@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- API Configuration for TMDB & AniList embedded directly in HTML -->
+    <script>
+      window.CINEMATIC_CONFIG = {
+        TMDB_API_KEY: "57581da0c5497802a581bd56b93d7b0b",
+        ANILIST_CLIENT_ID: "42013",
+        TMDB_BASE_URL: "https://api.themoviedb.org/3",
+        TMDB_IMAGE_BASE: "https://image.tmdb.org/t/p",
+        ANILIST_GRAPHQL_URL: "https://graphql.anilist.co"
+      };
+    </script>
+
+    <script>
+      (function() {
+        try {
+          var _currentFetch = window.fetch ? window.fetch.bind(window) : undefined;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return _currentFetch;
+            },
+            set: function(val) {
+              _currentFetch = val;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          // Ignore
+        }
+      })();
+    </script>
+    <title>Cinematic Remote</title>
+    <meta name="description" content="A modern cinematic remote and entertainment system powered by EmbedMaster, featuring full-screen player playback, separate external bottom controls, real-time remote page synchronization, and chronological timeline browsing." />
+    <meta property="og:title" content="Cinematic Remote" />
+    <meta property="og:description" content="A modern cinematic remote and entertainment system powered by EmbedMaster, featuring full-screen player playback, separate external bottom controls, real-time remote page synchronization, and chronological timeline browsing." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

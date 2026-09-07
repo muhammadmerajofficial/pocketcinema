@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Registered user profile and authentication sync",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User profile photo URL"
+        },
+        "provider": {
+          "type": "string",
+          "description": "Authentication provider"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account creation timestamp"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "Last sign-in timestamp"
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "RemoteSession": {
+      "title": "Remote Session",
+      "description": "Real-time pairing and synchronization session between main remote and display",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "6-character unique pairing code"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner"
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "User Gmail address"
+        },
+        "userDisplayName": {
+          "type": "string",
+          "description": "User display name"
+        },
+        "currentItem": {
+          "type": "object",
+          "description": "Currently selected media item"
+        },
+        "playingItem": {
+          "type": "object",
+          "description": "Currently playing media item or null"
+        },
+        "activeCategory": {
+          "type": "string",
+          "description": "Active category type"
+        },
+        "searchQuery": {
+          "type": "string",
+          "description": "Active search query"
+        },
+        "selectedIndex": {
+          "type": "number",
+          "description": "Selected item index"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Session creation timestamp"
+        }
+      },
+      "required": ["code", "userId", "userEmail"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document accessible by the authenticated user"
+    },
+    "/remote_sessions/{sessionCode}": {
+      "schema": "RemoteSession",
+      "description": "Live remote sync session pairing document keyed by 6-digit code"
+    }
+  }
+}
