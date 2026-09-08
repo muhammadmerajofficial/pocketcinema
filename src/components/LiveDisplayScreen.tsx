@@ -5,24 +5,43 @@ import {
   Clock, 
   Maximize, 
   Minimize, 
+  Maximize2,
   KeyRound, 
-  ArrowRight, 
   RefreshCw, 
-  Sparkles 
+  Sparkles,
+  Wifi,
+  Copy,
+  Check,
+  ShieldAlert,
+  Smartphone,
+  Unplug
 } from 'lucide-react';
 import { MediaItem, CategoryType } from '../types';
 import { loadCategoryMedia } from '../services/api';
 import { FullScreenRemotePlayer } from './FullScreenRemotePlayer';
 import { syncManager, DisplaySyncState, SyncMessage } from '../utils/syncChannel';
-import { verifyPairingCode, activateRemoteSession, disconnectRemoteSession, listenToRemoteSession, RemoteSessionData, updateRemoteSession } from '../services/remotePairing';
+import { 
+  verifyPairingCode, 
+  activateRemoteSession, 
+  disconnectRemoteSession, 
+  listenToRemoteSession, 
+  RemoteSessionData, 
+  updateRemoteSession,
+  QUICK_CONNECT_CODE,
+  initQuickConnectDisplaySession,
+  sendDisplayHeartbeat,
+  closeQuickConnectDisplaySession
+} from '../services/remotePairing';
 import { checkFirebaseStatus } from '../lib/firebase';
 import { soundFx } from '../utils/sound';
 
 export const LiveDisplayScreen: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copiedQuickCode, setCopiedQuickCode] = useState(false);
+  const [displayNetworkIp, setDisplayNetworkIp] = useState<string>('Detecting Wi-Fi...');
 
-  // Pairing State - restore active pairing code from URL or localStorage
+  // Pairing State - restore active pairing code from URL or localStorage (excluding gotocinema to avoid stale auto-reconnects)
   const [pairingCode, setPairingCode] = useState<string>(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -30,7 +49,8 @@ export const LiveDisplayScreen: React.FC = () => {
       if (codeFromUrl && codeFromUrl.trim().length === 6) {
         return codeFromUrl.trim();
       }
-      return localStorage.getItem('cinematic_paired_code') || '';
+      const saved = localStorage.getItem('cinematic_paired_code') || '';
+      return saved === QUICK_CONNECT_CODE ? '' : saved;
     } catch {
       return '';
     }
@@ -40,32 +60,39 @@ export const LiveDisplayScreen: React.FC = () => {
       const urlParams = new URLSearchParams(window.location.search);
       const codeFromUrl = urlParams.get('code');
       const savedCode = localStorage.getItem('cinematic_paired_code');
-      return !!((codeFromUrl && codeFromUrl.trim().length === 6) || savedCode);
+      return !!((codeFromUrl && codeFromUrl.trim().length === 6) || (savedCode && savedCode !== QUICK_CONNECT_CODE));
     } catch {
       return false;
     }
   });
   const [pairedEmail, setPairedEmail] = useState<string>('');
-  const [codeInputValue, setCodeInputValue] = useState<string>('');
-  const [isActivating, setIsActivating] = useState<boolean>(false);
-  const [activationError, setActivationError] = useState<string | null>(null);
 
-  // Auto-connect on mount if pairing code exists in localStorage or URL
+  // Initialize gotocinema Same-Network session on Firebase when Display is opened
   useEffect(() => {
-    if (pairingCode && pairingCode.length === 6) {
-      activateRemoteSession(pairingCode)
-        .then((res) => {
-          if (res.valid) {
-            setIsPaired(true);
-            try {
-              localStorage.setItem('cinematic_paired_code', pairingCode);
-            } catch (_) {}
-            if (res.data?.playingItem) setPlayingItem(res.data.playingItem);
-            if (res.data?.currentItem) setCurrentItem(res.data.currentItem);
-          }
-        })
-        .catch((err) => console.warn('[LiveDisplay] Auto-activation note:', err));
-    }
+    let isMounted = true;
+    initQuickConnectDisplaySession().then((res) => {
+      if (isMounted && res.success) {
+        setDisplayNetworkIp(res.networkIp);
+      }
+    });
+
+    const heartbeatTimer = setInterval(() => {
+      sendDisplayHeartbeat();
+    }, 10000);
+
+    const handleBeforeUnload = () => {
+      closeQuickConnectDisplaySession();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('unload', handleBeforeUnload);
+
+    return () => {
+      isMounted = false;
+      clearInterval(heartbeatTimer);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('unload', handleBeforeUnload);
+    };
   }, []);
 
   // Media Display State
@@ -108,72 +135,113 @@ export const LiveDisplayScreen: React.FC = () => {
   const [latestCommand, setLatestCommand] = useState<{ command: string; value?: any; extra?: any; timestamp: number } | null>(null);
   const lastCommandTimestampRef = useRef<number>(0);
 
-  // 1. Real-time Firebase listener when paired (only after manual code activation)
+  // Auto-connect on mount if 6-digit pairing code exists in localStorage or URL
   useEffect(() => {
-    if (!isPaired || !pairingCode) return;
+    if (pairingCode && pairingCode.length === 6) {
+      activateRemoteSession(pairingCode)
+        .then((res) => {
+          if (res.valid) {
+            setIsPaired(true);
+            try {
+              localStorage.setItem('cinematic_paired_code', pairingCode);
+            } catch (_) {}
+            if (res.data?.playingItem) setPlayingItem(res.data.playingItem);
+            if (res.data?.currentItem) setCurrentItem(res.data.currentItem);
+          }
+        })
+        .catch((err) => console.warn('[LiveDisplay] Auto-activation note:', err));
+    }
+  }, []);
+
+  // Unified Real-time Firebase listener: handles both gotocinema and 6-digit sessions seamlessly
+  useEffect(() => {
+    const targetCode = pairingCode || QUICK_CONNECT_CODE;
+    console.log('[LiveDisplayScreen] Subscribing to session:', targetCode);
 
     const unsubscribeFirebase = listenToRemoteSession(
-      pairingCode,
+      targetCode,
       (data: RemoteSessionData | null) => {
-        // If session document was deleted or marked inactive/disconnected by Main Remote:
-        if (!data || data.isActive === false || data.isConnected === false) {
-          console.log('[LiveDisplayScreen] Session disconnected from Main Remote');
+        if (!data) return;
+
+        // If explicitly disconnected by remote
+        if (data.isActive === false && data.isConnected === false && data.disconnectedAt) {
+          console.log('[LiveDisplayScreen] Remote session explicitly disconnected');
           setIsPaired(false);
-          setPairingCode('');
-          setCodeInputValue('');
           setPlayingItem(null);
           setPairedEmail('');
-          try {
-            localStorage.removeItem('cinematic_paired_code');
-            window.history.replaceState({}, '', window.location.pathname + '?view=display');
-          } catch (_) {}
-          setActivationError('Session disconnected from Main Remote. Enter your 6-digit code to reconnect.');
+          if (targetCode !== QUICK_CONNECT_CODE) {
+            setPairingCode('');
+            try {
+              localStorage.removeItem('cinematic_paired_code');
+              window.history.replaceState({}, '', window.location.pathname + '?view=display');
+            } catch (_) {}
+          }
           return;
         }
 
-        if (data) {
-          setPairedEmail(data.userEmail || '');
-          if (data.currentItem) {
-            setCurrentItem((prev) => (prev?.id === data.currentItem?.id ? prev : data.currentItem));
-            setIsLoading(false);
+        // When a remote controller connects
+        if (data.isConnected) {
+          setIsPaired(true);
+          if (data.code && !pairingCode) {
+            setPairingCode(data.code);
           }
+        }
+
+        if (data.userEmail) {
+          setPairedEmail(data.userEmail);
+        }
+
+        // Instant Movie / TV Playback Sync
+        if ('playingItem' in data) {
+          console.log('[LiveDisplayScreen] Received playingItem:', data.playingItem?.title || 'null');
           setPlayingItem(data.playingItem || null);
-          if (typeof data.serverIndex === 'number') {
-            setServerIndex((prev) => (prev === data.serverIndex ? prev : data.serverIndex!));
-          }
-          if (typeof data.season === 'number') {
-            setSeason((prev) => (prev === data.season ? prev : data.season!));
-          }
-          if (typeof data.episode === 'number') {
-            setEpisode((prev) => (prev === data.episode ? prev : data.episode!));
-          }
-          if (data.playerAction && typeof data.playerAction.timestamp === 'number') {
-            setRemotePlayerAction((prev) =>
-              prev?.timestamp === data.playerAction!.timestamp ? prev : data.playerAction
-            );
-          }
-          if (data.playerCommand && typeof data.playerCommand.timestamp === 'number') {
-            if (data.playerCommand.timestamp !== lastCommandTimestampRef.current) {
-              lastCommandTimestampRef.current = data.playerCommand.timestamp;
-              if (data.playerCommand.command === 'stop') {
-                setPlayingItem(null);
-              }
-              setLatestCommand({ ...data.playerCommand });
-              syncManager.broadcast({
-                type: 'PLAYER_COMMAND',
-                command: data.playerCommand.command as any,
-                value: data.playerCommand.value,
-                extra: data.playerCommand.extra,
-                timestamp: data.playerCommand.timestamp,
-              });
+        }
+
+        if (data.currentItem) {
+          setCurrentItem((prev) => (prev?.id === data.currentItem?.id ? prev : data.currentItem));
+          setIsLoading(false);
+        }
+
+        if (typeof data.serverIndex === 'number') {
+          setServerIndex((prev) => (prev === data.serverIndex ? prev : data.serverIndex!));
+        }
+        if (typeof data.season === 'number') {
+          setSeason((prev) => (prev === data.season ? prev : data.season!));
+        }
+        if (typeof data.episode === 'number') {
+          setEpisode((prev) => (prev === data.episode ? prev : data.episode!));
+        }
+
+        if (data.playerAction && typeof data.playerAction.timestamp === 'number') {
+          setRemotePlayerAction((prev) =>
+            prev?.timestamp === data.playerAction!.timestamp ? prev : data.playerAction
+          );
+        }
+
+        // Process real-time player commands (play, pause, seek, stop, volume, next, prev, etc.)
+        if (data.playerCommand && typeof data.playerCommand.timestamp === 'number') {
+          if (data.playerCommand.timestamp !== lastCommandTimestampRef.current) {
+            lastCommandTimestampRef.current = data.playerCommand.timestamp;
+            console.log('[LiveDisplayScreen] Processing player command:', data.playerCommand.command);
+            if (data.playerCommand.command === 'stop') {
+              setPlayingItem(null);
             }
+            setLatestCommand({ ...data.playerCommand });
+            syncManager.broadcast({
+              type: 'PLAYER_COMMAND',
+              command: data.playerCommand.command as any,
+              value: data.playerCommand.value,
+              extra: data.playerCommand.extra,
+              timestamp: data.playerCommand.timestamp,
+            });
           }
-          if (data.activeCategory) {
-            setActiveCategory((prev) => (prev === data.activeCategory ? prev : data.activeCategory!));
-          }
-          if (typeof data.searchQuery === 'string') {
-            setSearchQuery((prev) => (prev === data.searchQuery ? prev : data.searchQuery!));
-          }
+        }
+
+        if (data.activeCategory) {
+          setActiveCategory((prev) => (prev === data.activeCategory ? prev : data.activeCategory!));
+        }
+        if (typeof data.searchQuery === 'string') {
+          setSearchQuery((prev) => (prev === data.searchQuery ? prev : data.searchQuery!));
         }
       },
       (err) => {
@@ -184,7 +252,7 @@ export const LiveDisplayScreen: React.FC = () => {
     return () => {
       unsubscribeFirebase();
     };
-  }, [isPaired, pairingCode]);
+  }, [pairingCode]);
 
   // 3. Fallback Local BroadcastChannel sync (cross-tab on same browser)
   useEffect(() => {
@@ -195,14 +263,12 @@ export const LiveDisplayScreen: React.FC = () => {
         console.log('[LiveDisplayScreen] Local broadcast DISCONNECT received');
         setIsPaired(false);
         setPairingCode('');
-        setCodeInputValue('');
         setPlayingItem(null);
         setPairedEmail('');
         try {
           localStorage.removeItem('cinematic_paired_code');
           window.history.replaceState({}, '', window.location.pathname + '?view=display');
         } catch (_) {}
-        setActivationError('Session disconnected from Main Remote. Enter your 6-digit code to reconnect.');
       } else if (msg.type === 'STATE_UPDATE') {
         if (msg.state.currentItem) setCurrentItem(msg.state.currentItem);
         setPlayingItem(msg.state.playingItem);
@@ -285,61 +351,25 @@ export const LiveDisplayScreen: React.FC = () => {
     }
   }, []);
 
-  // Handle Manual Activation Form
-  const handleActivateCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = codeInputValue.trim().replace(/\s+/g, '');
-    if (clean.length !== 6) {
-      setActivationError('Please enter a 6-digit code.');
-      return;
-    }
-
-    setActivationError(null);
-    setIsActivating(true);
-    soundFx.playClick('switch');
-
-    try {
-      const res = await activateRemoteSession(clean);
-      if (res.valid && res.data && res.data.isActive !== false && res.data.isConnected !== false) {
-        setPairingCode(clean);
-        setIsPaired(true);
-        setPairedEmail(res.userEmail || '');
-        if (res.data) {
-          if (res.data.currentItem) setCurrentItem(res.data.currentItem);
-          if (res.data.playingItem) setPlayingItem(res.data.playingItem);
-          if (res.data.activeCategory) setActiveCategory(res.data.activeCategory);
-          if (res.data.searchQuery) setSearchQuery(res.data.searchQuery);
-        }
-        try {
-          localStorage.setItem('cinematic_paired_code', clean);
-          window.history.replaceState({}, '', `${window.location.pathname}?view=display&code=${clean}`);
-        } catch (_) {}
-      } else {
-        setActivationError(res.error || 'Code not found. Please verify you are logged in on the Main Remote.');
-      }
-    } catch (err: any) {
-      setActivationError(err?.message || 'Failed to activate code in Firebase.');
-    } finally {
-      setIsActivating(false);
-    }
-  };
-
   const handleDisconnect = async () => {
     soundFx.playClick('switch');
     if (pairingCode) {
-      await disconnectRemoteSession(pairingCode);
+      if (pairingCode === QUICK_CONNECT_CODE) {
+        await closeQuickConnectDisplaySession();
+        await initQuickConnectDisplaySession();
+      } else {
+        await disconnectRemoteSession(pairingCode);
+      }
       syncManager.broadcast({ type: 'DISCONNECT', timestamp: Date.now() });
     }
     setIsPaired(false);
     setPairingCode('');
-    setCodeInputValue('');
     setPairedEmail('');
     setPlayingItem(null);
     try {
       localStorage.removeItem('cinematic_paired_code');
       window.history.replaceState({}, '', window.location.pathname + '?view=display');
     } catch (_) {}
-    setActivationError('Disconnected. Enter your 6-digit code to reconnect.');
   };
 
   // Toggle fullscreen for TV / Monitor display
@@ -359,95 +389,134 @@ export const LiveDisplayScreen: React.FC = () => {
     }
   };
 
+  const handleCopyQuickCode = () => {
+    soundFx.playClick('switch');
+    navigator.clipboard.writeText(QUICK_CONNECT_CODE);
+    setCopiedQuickCode(true);
+    setTimeout(() => setCopiedQuickCode(false), 2000);
+  };
+
   // --- RENDERING: ACTIVATION / PAIRING SCREEN IF NOT PAIRED ---
   if (!isPaired) {
     return (
       <div 
         ref={containerRef}
         id="display-activation-screen"
-        className="relative w-screen h-screen min-h-screen bg-[#050608] text-white flex flex-col items-center justify-center p-4 sm:p-6 overflow-hidden select-none font-sans"
+        className="relative w-screen h-screen min-h-screen bg-[#050608] text-white flex flex-col items-center justify-center p-3 sm:p-6 overflow-y-auto select-none font-sans"
       >
         {/* Ambient background glows */}
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-amber-500/10 blur-[150px] rounded-full pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-orange-600/5 blur-[160px] rounded-full pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-lg bg-zinc-950/90 border border-amber-500/30 rounded-3xl p-6 sm:p-10 shadow-[0_0_60px_rgba(0,0,0,0.9)] backdrop-blur-2xl flex flex-col gap-6">
+        <div className="relative z-10 w-full max-w-xl bg-zinc-950/95 border border-amber-500/30 rounded-3xl p-5 sm:p-8 shadow-[0_0_60px_rgba(0,0,0,0.9)] backdrop-blur-2xl flex flex-col gap-5 my-auto">
           {/* Header */}
           <div className="flex flex-col items-center text-center gap-2">
             <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.2)]">
               <Tv2 className="w-8 h-8 animate-pulse" />
             </div>
             <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-white font-mono mt-1">
-              ACTIVATE REMOTE DISPLAY
+              REMOTE DISPLAY (TV / PC)
             </h1>
-            <p className="text-xs sm:text-sm text-zinc-400 max-w-sm">
-              Enter the 6-digit code from your Cinema Remote to activate live synchronization.
+            <p className="text-xs sm:text-sm text-zinc-400 max-w-md">
+              Control this big screen in real-time from your mobile device using Cinema Remote.
             </p>
-            {/* Live Firebase Active Badge */}
-            <div className="flex items-center gap-2 mt-1 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-mono font-medium">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span>Firebase Cloud Sync: Active</span>
+
+            {/* Same Network IP Status Pill */}
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-1 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-mono">
+              <div className="flex items-center gap-1.5 text-amber-400">
+                <Wifi className="w-3.5 h-3.5" />
+                <span className="text-zinc-400 font-sans">Wi-Fi Network:</span>
+                <span className="font-bold text-white">{displayNetworkIp}</span>
+              </div>
+              <span className="text-zinc-600">•</span>
+              <div className="flex items-center gap-1 text-emerald-400 font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span>Ready for Phone</span>
+              </div>
             </div>
           </div>
 
-          {/* Activation Form */}
-          <form onSubmit={handleActivateCode} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="pairing-code-input" className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                <span>6-Digit Pairing Code</span>
-              </label>
-
-              <input
-                id="pairing-code-input"
-                type="text"
-                maxLength={6}
-                value={codeInputValue}
-                onChange={(e) => setCodeInputValue(e.target.value.replace(/\D/g, ''))}
-                placeholder="e.g. 583921"
-                className="w-full text-center text-3xl sm:text-4xl font-black tracking-[0.3em] py-3.5 px-4 rounded-2xl bg-black border-2 border-amber-500/40 text-amber-400 placeholder:text-zinc-700 focus:outline-none focus:border-amber-400 focus:shadow-[0_0_25px_rgba(245,158,11,0.4)] transition-all font-mono"
-                autoFocus
-              />
+          {/* Primary Feature: DEFAULT SAME-NETWORK QUICK CONNECT */}
+          <div className="flex flex-col gap-3.5 p-5 sm:p-6 rounded-2xl bg-black border-2 border-amber-500/50 shadow-[0_0_35px_rgba(245,158,11,0.2)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                  TV Connection Code (Pair with Remote)
+                </span>
+              </div>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium border border-emerald-500/30">
+                No Login Required
+              </span>
             </div>
 
-            {activationError && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs text-center font-medium">
-                {activationError}
+            {/* Permanent Code Display with Copy Button */}
+            <div className="flex items-center justify-between gap-3 p-4 sm:p-5 rounded-xl bg-zinc-900/90 border border-amber-500/30 shadow-inner">
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-500">
+                  Connection Code for Remote:
+                </span>
+                <span className="text-3xl sm:text-4xl font-black tracking-widest text-amber-400 font-mono drop-shadow-[0_0_20px_rgba(245,158,11,0.6)] select-all">
+                  {QUICK_CONNECT_CODE}
+                </span>
               </div>
-            )}
 
+              <button
+                id="copy-quick-connect-code-btn"
+                type="button"
+                onClick={handleCopyQuickCode}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-bold text-white transition-all cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                title="Copy Quick Connect Code"
+              >
+                {copiedQuickCode ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Bengali & English Guidance */}
+            <div className="text-xs text-zinc-300 space-y-2 leading-relaxed bg-zinc-950/70 p-3.5 rounded-xl border border-zinc-900">
+              <div className="flex items-start gap-2.5">
+                <Smartphone className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                <span>
+                  <strong>কানেক্ট করার নিয়ম:</strong> আপনার মোবাইল রিমোটের (Cinema Remote) Connect বক্সে কোড <code className="text-amber-400 font-bold font-mono px-1.5 py-0.5 bg-zinc-900 rounded border border-amber-500/30">{QUICK_CONNECT_CODE}</code> বসিয়ে <strong>Connect TV</strong> বাটনে চাপুন।
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5 pt-1.5 border-t border-zinc-900 text-zinc-400 text-[11px]">
+                <ShieldAlert className="w-4 h-4 text-amber-500/90 mt-0.5 shrink-0" />
+                <span>
+                  <strong>ডিসপ্লে থেকে কোনো ইনপুট লাগবে না:</strong> ডিসপ্লে শুধুমাত্র রিসিভার হিসেবে কাজ করছে। রিমোট থেকে কানেক্ট করলেই সাথে সাথে এই স্ক্রিনে ভিডিও প্লে হবে।
+                </span>
+              </div>
+            </div>
+
+            {/* Pulsing Status Bar */}
+            <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+              <span>Waiting for your mobile remote to connect with "{QUICK_CONNECT_CODE}"...</span>
+            </div>
+          </div>
+
+          {/* Fullscreen Toggle & Tips */}
+          <div className="flex items-center justify-between px-2 pt-1 text-xs text-zinc-500">
+            <span className="text-[11px]">Screen ID: {QUICK_CONNECT_CODE}</span>
             <button
-              id="activate-display-btn"
-              type="submit"
-              disabled={isActivating || codeInputValue.length !== 6}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-orange-500 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed text-black font-black text-sm uppercase tracking-wider shadow-[0_0_25px_rgba(245,158,11,0.35)] transition-all flex items-center justify-center gap-2 cursor-pointer"
+              id="display-screen-toggle-fullscreen"
+              type="button"
+              onClick={toggleFullscreen}
+              className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 font-medium cursor-pointer transition-colors"
             >
-              {isActivating ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Verifying Code in Firebase...</span>
-                </>
-              ) : (
-                <>
-                  <span>Activate & Connect</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>{isFullscreen ? 'Exit Fullscreen' : 'TV Fullscreen Mode'}</span>
             </button>
-          </form>
-
-          {/* Instructions note */}
-          <div className="flex flex-col gap-1.5 pt-3 border-t border-zinc-900 text-xs text-zinc-400">
-            <span className="font-semibold text-zinc-300">How to get your code:</span>
-            <span className="text-[11px] leading-relaxed">
-              1. Log into your Google account on the Main Cinema Remote page.
-            </span>
-            <span className="text-[11px] leading-relaxed">
-              2. Click the TV Pairing icon on the Main Remote to see your permanent 6-digit code.
-            </span>
-            <span className="text-[11px] leading-relaxed">
-              3. Enter that 6-digit code here and click <strong className="text-amber-400">Activate & Connect</strong>.
-            </span>
           </div>
         </div>
       </div>
@@ -481,28 +550,56 @@ export const LiveDisplayScreen: React.FC = () => {
         )}
       </div>
 
-      {/* 2. TOP BAR - MINIMAL FULLSCREEN CONTROL ONLY */}
-      <header className="relative z-20 flex items-center justify-end px-6 py-4 sm:px-10 sm:py-6 bg-gradient-to-b from-black/80 via-black/20 to-transparent">
-        {/* Fullscreen Button */}
-        <button
-          id="display-fullscreen-btn"
-          type="button"
-          onClick={toggleFullscreen}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 hover:bg-zinc-800/80 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-md backdrop-blur-md opacity-60 hover:opacity-100"
-          title="Toggle TV Fullscreen"
-        >
-          {isFullscreen ? (
-            <>
-              <Minimize className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Exit Fullscreen</span>
-            </>
+      {/* 2. TOP BAR - FULLSCREEN & PAIRING STATUS CONTROLS */}
+      <header className="relative z-20 flex items-center justify-between px-4 py-3 sm:px-8 sm:py-4 bg-gradient-to-b from-black/80 via-black/30 to-transparent">
+        <div className="flex items-center gap-2">
+          {pairingCode === QUICK_CONNECT_CODE ? (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-mono font-bold">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Quick Connect: {QUICK_CONNECT_CODE}</span>
+            </div>
           ) : (
-            <>
-              <Maximize className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">TV Fullscreen</span>
-            </>
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-zinc-900/80 border border-zinc-700 text-zinc-300 text-xs font-mono">
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              <span>Paired: #{pairingCode}</span>
+            </div>
           )}
-        </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Fullscreen Button */}
+          <button
+            id="display-fullscreen-btn"
+            type="button"
+            onClick={toggleFullscreen}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/60 hover:bg-zinc-800/80 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-md backdrop-blur-md opacity-80 hover:opacity-100"
+            title="Toggle TV Fullscreen"
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Exit Fullscreen</span>
+              </>
+            ) : (
+              <>
+                <Maximize className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">TV Fullscreen</span>
+              </>
+            )}
+          </button>
+
+          {/* Disconnect Button */}
+          <button
+            id="display-disconnect-btn"
+            type="button"
+            onClick={handleDisconnect}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 border border-red-800/50 text-red-300 text-xs font-semibold transition-all cursor-pointer shadow-md backdrop-blur-md opacity-80 hover:opacity-100"
+            title="Disconnect Display"
+          >
+            <Unplug className="w-3.5 h-3.5 text-red-400" />
+            <span className="hidden sm:inline">Disconnect</span>
+          </button>
+        </div>
       </header>
 
       {/* 3. CENTER DISPLAY SHOWCASE (POSTER & METADATA - LIVE FROM FIREBASE CONTROLLER) */}

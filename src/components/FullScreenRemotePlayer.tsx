@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MediaItem } from '../types';
 import { ALL_PLAYER_SERVERS, formatEmbedMasterId } from '../utils/servers';
-import { updateRemoteSession } from '../services/remotePairing';
+import { updateRemoteSession, QUICK_CONNECT_CODE } from '../services/remotePairing';
 import { syncManager, SyncMessage } from '../utils/syncChannel';
 
 interface FullScreenRemotePlayerProps {
@@ -31,6 +31,9 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
   const localDurationRef = useRef<number>(item.runtime ? item.runtime * 60 : 7200);
   const localIsPlayingRef = useRef<boolean>(true);
   const [isIframeLoaded, setIsIframeLoaded] = useState(false);
+
+  // Active session code fallback to ensure updates always go through to Firebase
+  const effectivePairingCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_paired_code') : '') || QUICK_CONNECT_CODE;
 
   // Selected server (EmbedMaster is Server 0)
   const currentServer = ALL_PLAYER_SERVERS[serverIndex] || ALL_PLAYER_SERVERS[0];

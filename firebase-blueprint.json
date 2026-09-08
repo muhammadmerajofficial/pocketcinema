@@ -77,6 +77,46 @@
           "type": "number",
           "description": "Selected item index"
         },
+        "isQuickConnect": {
+          "type": "boolean",
+          "description": "True if this is the default same-network quick connect session (gotocinema)"
+        },
+        "networkIp": {
+          "type": "string",
+          "description": "Public IP/Network identifier for same-network verification"
+        },
+        "displayActive": {
+          "type": "boolean",
+          "description": "Whether the Remote Display window is currently open"
+        },
+        "displaySessionId": {
+          "type": "string",
+          "description": "Unique session ID for the active display window instance"
+        },
+        "displayLastHeartbeat": {
+          "type": "number",
+          "description": "Timestamp of last heartbeat from display window"
+        },
+        "connectedRemoteId": {
+          "type": "string",
+          "description": "Device ID of currently connected remote controller"
+        },
+        "connectedRemoteName": {
+          "type": "string",
+          "description": "Device name or description of connected remote"
+        },
+        "remoteLastHeartbeat": {
+          "type": "number",
+          "description": "Timestamp of last heartbeat from connected remote controller"
+        },
+        "remoteConnectedAt": {
+          "type": "number",
+          "description": "Timestamp when remote controller connected"
+        },
+        "disconnectedAt": {
+          "type": "string",
+          "description": "Timestamp when session or remote was disconnected"
+        },
         "updatedAt": {
           "type": "string",
           "description": "Last update timestamp"

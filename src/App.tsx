@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Volume2, 
   VolumeX, 
@@ -12,7 +12,13 @@ import {
   X,
   Camera,
   ExternalLink,
-  KeyRound
+  KeyRound,
+  Sparkles,
+  Layers,
+  Loader2,
+  ArrowRight,
+  Unplug,
+  RefreshCw
 } from 'lucide-react';
 import { CategoryType, MediaItem } from './types';
 import { loadCategoryMedia } from './services/api';
@@ -20,6 +26,7 @@ import { RemoteTopNav } from './components/RemoteTopNav';
 import { RemoteSearchBar } from './components/RemoteSearchBar';
 import { RemoteControlBar } from './components/RemoteControlBar';
 import { TimelineView } from './components/TimelineView';
+import { PosterSelectorDpad } from './components/PosterSelectorDpad';
 import { MediaDetailModal } from './components/MediaDetailModal';
 import { MainPageControlBar } from './components/MainPageControlBar';
 import { AuthModal } from './components/AuthModal';
@@ -29,7 +36,17 @@ import { DevicePairingModal } from './components/DevicePairingModal';
 import { auth, onAuthStateChanged, type User } from './lib/firebase';
 import { soundFx } from './utils/sound';
 import { syncManager } from './utils/syncChannel';
-import { getOrCreateUserSession, updateRemoteSession, disconnectRemoteSession } from './services/remotePairing';
+import { 
+  getOrCreateUserSession, 
+  updateRemoteSession, 
+  disconnectRemoteSession, 
+  QUICK_CONNECT_CODE, 
+  sendRemoteHeartbeat, 
+  disconnectQuickNetworkRemote, 
+  getDeviceSessionId, 
+  listenToRemoteSession,
+  connectRemoteWithCode
+} from './services/remotePairing';
 
 export default function App() {
   // Check if opened in dedicated Live Display mode (?view=display, ?view=screen, ?view=remote, ?view=iframe)
@@ -66,6 +83,9 @@ export default function App() {
     }
   });
   const [isPairingModalOpen, setIsPairingModalOpen] = useState(false);
+  const [mainPageCodeInput, setMainPageCodeInput] = useState<string>('');
+  const [isConnectingMainPage, setIsConnectingMainPage] = useState<boolean>(false);
+  const [mainPageConnectFeedback, setMainPageConnectFeedback] = useState<{ success: boolean; msg: string } | null>(null);
 
   // Live Player Server & Episode state for remote synchronization
   const [playerServerIndex, setPlayerServerIndex] = useState(0);
@@ -73,13 +93,147 @@ export default function App() {
   const [playerEpisode, setPlayerEpisode] = useState(1);
   const [playerRemoteAction, setPlayerRemoteAction] = useState<{ action: 'play' | 'preview' | 'next'; timestamp: number } | null>(null);
 
+  // Centralized robust Play Trigger for TV and remote
+  const handlePlayMedia = (item: MediaItem, season = 1, episode = 1) => {
+    if (isScreenLocked) return;
+    soundFx.playClick('ok');
+    setPlayingMedia(item);
+    setIsPlayerHidden(false);
+    setPlayerSeason(season);
+    setPlayerEpisode(episode);
+
+    const now = Date.now();
+    // 1. Local state & BroadcastChannel
+    syncManager.saveState({
+      playingItem: item,
+      serverIndex: playerServerIndex,
+      season,
+      episode,
+    });
+    syncManager.broadcast({
+      type: 'PLAY',
+      item,
+      serverIndex: playerServerIndex,
+      season,
+      episode,
+    });
+
+    // 2. Firebase live dispatch to TV Display
+    const activeCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_pairing_code') : '') || '';
+    if (activeCode) {
+      console.log('[Remote] Sending PLAY command to TV:', item.title, 'Code:', activeCode);
+      updateRemoteSession(activeCode, {
+        playingItem: item,
+        serverIndex: playerServerIndex,
+        season,
+        episode,
+        playerCommand: { command: 'play', timestamp: now },
+        playerStatus: {
+          isPlaying: true,
+          currentTime: 0,
+          duration: 0,
+          volume: 100,
+          isMuted: false,
+          timestamp: now,
+        },
+      });
+    }
+  };
+
+  // Direct connect from Main Remote page (supporting alphanumeric codes, gotocinema, and 6-digit codes)
+  const handleMainPageConnect = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = mainPageCodeInput.trim();
+    if (!clean) return;
+
+    setIsConnectingMainPage(true);
+    setMainPageConnectFeedback(null);
+    soundFx.playClick('switch');
+
+    try {
+      const res = await connectRemoteWithCode(clean);
+      if (res.success) {
+        soundFx.playClick('ok');
+        setPairingCode(res.code);
+        setMainPageConnectFeedback({
+          success: true,
+          msg: `Connected to TV Display (${res.code})!`
+        });
+        setMainPageCodeInput('');
+      } else {
+        soundFx.playClick('switch');
+        setMainPageConnectFeedback({
+          success: false,
+          msg: res.error || 'Failed to connect to TV.'
+        });
+      }
+    } catch (err: any) {
+      soundFx.playClick('switch');
+      setMainPageConnectFeedback({
+        success: false,
+        msg: err?.message || 'Error connecting to TV.'
+      });
+    } finally {
+      setIsConnectingMainPage(false);
+    }
+  };
+
+  const handleMainPageDisconnect = async () => {
+    soundFx.playClick('switch');
+    if (!pairingCode) return;
+    try {
+      if (pairingCode === QUICK_CONNECT_CODE) {
+        await disconnectQuickNetworkRemote();
+      } else {
+        await disconnectRemoteSession(pairingCode);
+      }
+      setPairingCode('');
+      setMainPageConnectFeedback({
+        success: true,
+        msg: 'Disconnected from TV Display.'
+      });
+      setTimeout(() => setMainPageConnectFeedback(null), 3000);
+    } catch (err) {
+      console.warn('Disconnect error:', err);
+    }
+  };
+
   // Sync pairing code with localStorage
   useEffect(() => {
     if (pairingCode) {
       try {
         localStorage.setItem('cinematic_remote_pairing_code', pairingCode);
       } catch (_) {}
+    } else {
+      try {
+        localStorage.removeItem('cinematic_remote_pairing_code');
+      } catch (_) {}
     }
+  }, [pairingCode]);
+
+  // Quick Connect (gotocinema) Remote Heartbeat & Session Monitor
+  useEffect(() => {
+    if (pairingCode !== QUICK_CONNECT_CODE) return;
+
+    // Send initial remote heartbeat and keep-alive
+    sendRemoteHeartbeat();
+    const heartbeatInterval = setInterval(() => {
+      sendRemoteHeartbeat();
+    }, 8000);
+
+    // Listen to session: only disconnect if display explicitly disconnected
+    const unsubscribe = listenToRemoteSession(QUICK_CONNECT_CODE, (data) => {
+      if (!data) return;
+      if (data.displayActive === false && data.isActive === false && data.disconnectedAt) {
+        console.log('[Remote] Display was explicitly closed.');
+        setPairingCode('');
+      }
+    });
+
+    return () => {
+      clearInterval(heartbeatInterval);
+      unsubscribe();
+    };
   }, [pairingCode]);
 
   // Listen to Firebase Auth state & retrieve/create pairing code stored with Gmail
@@ -89,7 +243,8 @@ export default function App() {
       if (user) {
         getOrCreateUserSession(user)
           .then((code) => {
-            setPairingCode(code);
+            // Only set if not already quick-connected
+            setPairingCode((prev) => (prev === QUICK_CONNECT_CODE ? prev : code));
             try {
               localStorage.setItem('cinematic_remote_pairing_code', code);
             } catch (_) {}
@@ -146,11 +301,13 @@ export default function App() {
       });
 
       if (pairingCode) {
+        const now = Date.now();
         updateRemoteSession(pairingCode, {
           playingItem: playingMedia,
           serverIndex: playerServerIndex,
           season: playerSeason,
           episode: playerEpisode,
+          playerCommand: { command: 'play', timestamp: now },
         });
       }
     } else {
@@ -158,8 +315,10 @@ export default function App() {
       syncManager.broadcast({ type: 'CLOSE_PLAYER' });
 
       if (pairingCode) {
+        const now = Date.now();
         updateRemoteSession(pairingCode, {
           playingItem: null,
+          playerCommand: { command: 'stop', timestamp: now },
         });
       }
     }
@@ -438,13 +597,10 @@ export default function App() {
     } else if (action === 'ok') {
       const item = mediaItems[selectedIndex];
       if (item) {
-        setPlayingMedia(item);
-        setIsPlayerHidden(false);
-        setPlayerSeason(1);
-        setPlayerEpisode(1);
+        handlePlayMedia(item, 1, 1);
       }
     }
-  }, [mediaItems, selectedIndex, hasMore, loadNextPage, playingMedia, isScreenLocked]);
+  }, [mediaItems, selectedIndex, hasMore, loadNextPage, playingMedia, isScreenLocked, handlePlayMedia]);
 
   // Physical Keyboard Navigation for TV/Remote feel
   useEffect(() => {
@@ -552,7 +708,12 @@ export default function App() {
   const handleDisconnectRemote = async () => {
     soundFx.playClick('switch');
     if (pairingCode) {
-      await disconnectRemoteSession(pairingCode);
+      if (pairingCode === QUICK_CONNECT_CODE) {
+        await disconnectQuickNetworkRemote();
+      } else {
+        await disconnectRemoteSession(pairingCode);
+      }
+      setPairingCode('');
       syncManager.broadcast({ type: 'DISCONNECT', timestamp: Date.now() });
       syncManager.saveState({ playingItem: null });
       setPlayingMedia(null);
@@ -607,12 +768,14 @@ export default function App() {
                   setIsPairingModalOpen(true);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-amber-400 hover:text-amber-300 border border-amber-500/40 font-mono font-bold text-xs sm:text-sm tracking-wider cursor-pointer shadow-md transition-all hover:scale-105 active:scale-95"
-                title="View TV Pairing Code (Firebase Sync with your Gmail)"
+                title="View TV Pairing Code (Quick Connect: gotocinema / Cloud 6-digit Code)"
               >
                 <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
                 {pairingCode ? (
                   <span className="flex items-center gap-1">
-                    <span className="hidden sm:inline text-zinc-400 font-sans text-xs">Code:</span>
+                    <span className="hidden sm:inline text-zinc-400 font-sans text-xs">
+                      {pairingCode === QUICK_CONNECT_CODE ? 'Quick:' : 'Code:'}
+                    </span>
                     <span className="text-white font-black tracking-widest">{pairingCode}</span>
                   </span>
                 ) : (
@@ -719,6 +882,110 @@ export default function App() {
             </div>
           </div>
 
+          {/* Direct TV Display Connect Bar on Main Remote Page */}
+          <div 
+            id="main-page-tv-connect-bar" 
+            className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 px-3 py-2 sm:py-2.5 bg-zinc-900/90 border border-amber-500/30 rounded-xl sm:rounded-2xl shadow-inner"
+          >
+            {pairingCode ? (
+              <div className="flex flex-wrap items-center justify-between w-full gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-xs font-medium text-zinc-300">Connected to TV Display:</span>
+                  <span className="font-mono font-black text-amber-400 text-sm tracking-wider px-2 py-0.5 bg-black/60 rounded-md border border-amber-500/30">
+                    {pairingCode}
+                  </span>
+                  <span className="hidden md:inline text-[11px] text-emerald-400 font-medium">
+                    (Active Remote Control)
+                  </span>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <a
+                    id="main-bar-open-display-btn"
+                    href={`?view=display&code=${pairingCode}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => soundFx.playClick('switch')}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-amber-300 text-xs font-semibold border border-amber-500/30 transition-all cursor-pointer"
+                    title="Open or focus TV display"
+                  >
+                    <Tv2 className="w-3.5 h-3.5" />
+                    <span>Display View</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+
+                  <button
+                    id="main-bar-disconnect-tv-btn"
+                    type="button"
+                    onClick={handleMainPageDisconnect}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/50 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <Unplug className="w-3 h-3 text-red-400" />
+                    <span>Disconnect</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    <Tv2 className="w-4 h-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
+                      TV CONNECT
+                      <span className="text-[10px] text-amber-400/90 font-sans font-normal lowercase">(alphabet & numbers)</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-400">
+                      Code shown on TV (e.g. <button type="button" onClick={() => { soundFx.playClick('switch'); setMainPageCodeInput(QUICK_CONNECT_CODE); }} className="text-amber-400 underline font-mono font-bold hover:text-amber-300 cursor-pointer">{QUICK_CONNECT_CODE}</button>)
+                    </span>
+                  </div>
+                </div>
+
+                <form onSubmit={handleMainPageConnect} className="flex items-center gap-2">
+                  <input
+                    id="main-page-tv-code-input"
+                    type="text"
+                    value={mainPageCodeInput}
+                    onChange={(e) => setMainPageCodeInput(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                    placeholder="gotocinema"
+                    className="w-32 sm:w-44 text-center font-mono text-sm sm:text-base font-black py-1.5 px-2.5 bg-black/80 border border-amber-500/40 rounded-xl text-amber-400 placeholder:text-zinc-600 focus:outline-none focus:border-amber-400 tracking-wider shadow-inner"
+                  />
+                  <button
+                    id="main-page-tv-connect-btn"
+                    type="submit"
+                    disabled={isConnectingMainPage || !mainPageCodeInput.trim()}
+                    className="py-1.5 px-3.5 sm:px-4 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-orange-500 hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-95 whitespace-nowrap"
+                  >
+                    {isConnectingMainPage ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <>
+                        <span>Connect TV</span>
+                        <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+          
+          {/* Main Page Connect Feedback Notification */}
+          {mainPageConnectFeedback && (
+            <div className={`px-3 py-1.5 rounded-xl text-xs text-center font-medium ${
+              mainPageConnectFeedback.success 
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                : 'bg-red-500/10 text-red-400 border border-red-500/30'
+            }`}>
+              {mainPageConnectFeedback.msg}
+            </div>
+          )}
+
           {/* 1. TOP: Movie, TV Show, Anime 3 Buttons strictly in ONE Line */}
           <div className={isScreenLocked ? 'opacity-40 pointer-events-none' : ''}>
             <RemoteTopNav
@@ -743,6 +1010,33 @@ export default function App() {
               activeCategory={activeCategory}
             />
           </div>
+
+          {/* 3. SUBHEADER: Category Title + Item Count */}
+          <div className={`flex items-center justify-between gap-2.5 sm:gap-4 pt-1.5 border-t border-zinc-800/80 ${isScreenLocked ? 'opacity-30 pointer-events-none' : ''}`}>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <h2 className="text-xs sm:text-sm md:text-base font-bold uppercase tracking-wider text-zinc-200">
+                  {activeCategory === 'movies' ? 'Movie Collection' : activeCategory === 'tv' ? 'TV Show Series' : 'Anime Chronology'}
+                </h2>
+              </div>
+            </div>
+
+            {/* Right: Items counter */}
+            <div className="flex items-center gap-2 shrink-0">
+              {isLoading ? (
+                <span className="text-[11px] sm:text-xs font-mono text-amber-400 bg-zinc-900/90 border border-zinc-800 px-2 sm:px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
+                  <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                  <span className="hidden sm:inline">Loading...</span>
+                </span>
+              ) : (
+                <span className="text-[11px] sm:text-xs font-mono text-zinc-400 bg-zinc-900/90 border border-zinc-800 px-2 sm:px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
+                  <Layers className="w-3 h-3 text-zinc-500" />
+                  <span>{mediaItems.length} <span className="hidden sm:inline">titles</span></span>
+                </span>
+              )}
+            </div>
+          </div>
         </header>
 
         {/* 4. Chronological Content Grid (Clean Main Page; Single controller appears at bottom ONLY when a movie is playing) */}
@@ -763,43 +1057,7 @@ export default function App() {
               setActiveModalItem(item);
             }}
             onPlayItem={(item) => {
-              if (isScreenLocked) return;
-              soundFx.playClick('ok');
-              setPlayingMedia(item);
-              setPlayerSeason(1);
-              setPlayerEpisode(1);
-              // Instant real-time Firebase & Broadcast dispatch
-              syncManager.saveState({
-                playingItem: item,
-                serverIndex: playerServerIndex,
-                season: 1,
-                episode: 1,
-              });
-              syncManager.broadcast({
-                type: 'PLAY',
-                item,
-                serverIndex: playerServerIndex,
-                season: 1,
-                episode: 1,
-              });
-              if (pairingCode) {
-                const now = Date.now();
-                updateRemoteSession(pairingCode, {
-                  playingItem: item,
-                  serverIndex: playerServerIndex,
-                  season: 1,
-                  episode: 1,
-                  playerCommand: { command: 'play', timestamp: now },
-                  playerStatus: {
-                    isPlaying: true,
-                    currentTime: 0,
-                    duration: 0,
-                    volume: 100,
-                    isMuted: false,
-                    timestamp: now,
-                  },
-                });
-              }
+              handlePlayMedia(item, 1, 1);
             }}
             loadMoreRef={loadMoreAnchorRef}
           />
@@ -827,6 +1085,21 @@ export default function App() {
 
       </div>
 
+      {/* Fixed Bottom-Left Poster Selector Controller (Matching Top Bar Deck Style) */}
+      <PosterSelectorDpad
+        items={mediaItems}
+        selectedIndex={selectedIndex}
+        category={activeCategory}
+        onSelectItem={(idx) => {
+          if (isScreenLocked) return;
+          setSelectedIndex(idx);
+        }}
+        onPlayItem={(item) => {
+          handlePlayMedia(item, 1, 1);
+        }}
+        disabled={isScreenLocked}
+      />
+
       {/* Floating Scroll to Top Button (Top icon to jump to top with 1 click) */}
       <button
         id="scroll-to-top-btn"
@@ -849,43 +1122,7 @@ export default function App() {
         isBookmarked={activeModalItem ? bookmarks.includes(activeModalItem.id) : false}
         onToggleBookmark={toggleBookmark}
         onPlay={(item) => {
-          soundFx.playClick('ok');
-          setPlayingMedia(item);
-          setIsPlayerHidden(false);
-          setPlayerSeason(1);
-          setPlayerEpisode(1);
-          // Instant real-time Firebase & Broadcast dispatch
-          syncManager.saveState({
-            playingItem: item,
-            serverIndex: playerServerIndex,
-            season: 1,
-            episode: 1,
-          });
-          syncManager.broadcast({
-            type: 'PLAY',
-            item,
-            serverIndex: playerServerIndex,
-            season: 1,
-            episode: 1,
-          });
-          if (pairingCode) {
-            const now = Date.now();
-            updateRemoteSession(pairingCode, {
-              playingItem: item,
-              serverIndex: playerServerIndex,
-              season: 1,
-              episode: 1,
-              playerCommand: { command: 'play', timestamp: now },
-              playerStatus: {
-                isPlaying: true,
-                currentTime: 0,
-                duration: 0,
-                volume: 100,
-                isMuted: false,
-                timestamp: now,
-              },
-            });
-          }
+          handlePlayMedia(item, 1, 1);
         }}
       />
 

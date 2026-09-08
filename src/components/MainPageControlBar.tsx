@@ -152,8 +152,9 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
       extra,
       timestamp,
     });
-    if (pairingCode) {
-      updateRemoteSession(pairingCode, {
+    const targetCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_pairing_code') : '') || '';
+    if (targetCode) {
+      updateRemoteSession(targetCode, {
         playerCommand: {
           command,
           value,
@@ -190,8 +191,9 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
 
   // 2. Listen to Firestore for remote player status (cross-device TV/Monitor sync)
   useEffect(() => {
-    if (!pairingCode) return;
-    const sessionDocRef = doc(db, 'remote_sessions', pairingCode);
+    const targetCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_pairing_code') : '') || '';
+    if (!targetCode) return;
+    const sessionDocRef = doc(db, 'remote_sessions', targetCode);
     const unsubscribe = onSnapshot(
       sessionDocRef,
       (snap) => {
@@ -260,8 +262,9 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
     syncManager.broadcast({ type: 'CLOSE_PLAYER' });
     dispatchCommand('stop');
     // 2. Clear playingItem in Firebase so Remote Display immediately exits full screen
-    if (pairingCode) {
-      updateRemoteSession(pairingCode, {
+    const targetCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_pairing_code') : '') || '';
+    if (targetCode) {
+      updateRemoteSession(targetCode, {
         playingItem: null,
         playerCommand: { command: 'stop', timestamp: Date.now() },
       });
@@ -397,8 +400,9 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
     soundFx.playClick('ok');
     dispatchCommand('seek', 0);
 
-    if (pairingCode) {
-      updateRemoteSession(pairingCode, {
+    const targetCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_pairing_code') : '') || '';
+    if (targetCode) {
+      updateRemoteSession(targetCode, {
         season: targetS,
         episode: targetE,
       });
@@ -646,6 +650,12 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
                     onClick={() => {
                       onServerChange(idx);
                       setShowServerMenu(false);
+                      const targetCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_pairing_code') : '') || '';
+                      if (targetCode) {
+                        updateRemoteSession(targetCode, {
+                          serverIndex: idx,
+                        });
+                      }
                     }}
                     className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs text-left transition-all ${
                       serverIndex === idx 

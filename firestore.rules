@@ -19,5 +19,10 @@ service cloud.firestore {
       // Anyone with the 6-digit pairing code can read and update the session for live playback sync
       allow read, write: if true;
     }
+
+    match /test/{docId} {
+      // Allow reading test document for health checks
+      allow read: if true;
+    }
   }
 }

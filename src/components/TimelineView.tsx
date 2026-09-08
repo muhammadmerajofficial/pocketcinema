@@ -1,18 +1,12 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { 
   Radio, 
   Star, 
   Calendar, 
-  Sparkles,
-  Info,
-  Layers,
+  Play,
   Loader2,
   CheckCircle2,
-  Play,
-  ChevronUp,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight
+  Info
 } from 'lucide-react';
 import { CategoryType, MediaItem } from '../types';
 import { soundFx } from '../utils/sound';
@@ -42,188 +36,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   onPlayItem,
   loadMoreRef,
 }) => {
-  const getGridCols = () => {
-    if (typeof window === 'undefined') return 5;
-    const w = window.innerWidth;
-    if (w >= 1024) return 5; // lg/xl
-    if (w >= 768) return 4;  // md
-    if (w >= 640) return 3;  // sm
-    return 2;                // mobile
-  };
-
-  const handleNavigate = (direction: 'up' | 'down' | 'left' | 'right') => {
-    if (!items || items.length === 0) return;
-    soundFx.playClick('switch');
-
-    const cols = getGridCols();
-    let nextIdx = selectedIndex;
-
-    switch (direction) {
-      case 'left':
-        nextIdx = Math.max(0, selectedIndex - 1);
-        break;
-      case 'right':
-        nextIdx = Math.min(items.length - 1, selectedIndex + 1);
-        break;
-      case 'up':
-        nextIdx = Math.max(0, selectedIndex - cols);
-        break;
-      case 'down':
-        nextIdx = Math.min(items.length - 1, selectedIndex + cols);
-        break;
-    }
-
-    if (nextIdx !== selectedIndex) {
-      onSelectItem(nextIdx);
-      setTimeout(() => {
-        const el = document.getElementById(`media-card-${items[nextIdx]?.id}`);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-        }
-      }, 50);
-    }
-  };
-
-  const handlePlaySelected = () => {
-    if (!items || items.length === 0) return;
-    const current = items[selectedIndex] || items[0];
-    if (current) {
-      soundFx.playClick('ok');
-      if (onPlayItem) {
-        onPlayItem(current);
-      } else {
-        onOpenDetails(current);
-      }
-    }
-  };
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea') return;
-
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        handleNavigate('left');
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        handleNavigate('right');
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        handleNavigate('up');
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        handleNavigate('down');
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        handlePlaySelected();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIndex, items]);
-
   return (
-    <section id="media-timeline-section" className="w-full flex flex-col gap-4 sm:gap-5">
-      
-      {/* Category banner & Counter & 1:1 D-Pad Poster Navigator */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1 border-b border-zinc-800/80 pb-3">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-            <h2 className="text-sm sm:text-base font-bold uppercase tracking-wider text-zinc-200">
-              {category === 'movies' ? 'Movie Collection' : category === 'tv' ? 'TV Show Series' : 'Anime Chronology'}
-            </h2>
-          </div>
+    <section id="media-timeline-section" className="w-full flex flex-col gap-4 sm:gap-5 pt-1">
 
-          {/* 1:1 Ratio 4-Direction Poster Controller + Center OK Button */}
-          <div 
-            id="movie-collection-dpad"
-            className="relative aspect-square w-14 h-14 sm:w-16 sm:h-16 bg-zinc-950/90 border border-zinc-700/80 rounded-2xl p-0.5 sm:p-1 shadow-lg grid grid-cols-3 grid-rows-3 items-center justify-items-center select-none shrink-0"
-            title="Poster Navigation D-Pad: Navigate posters up/down/left/right and press OK to play"
-          >
-            {/* UP BUTTON */}
-            <div className="col-start-2 row-start-1 w-full h-full flex items-center justify-center">
-              <button
-                id="dpad-btn-up"
-                type="button"
-                onClick={() => handleNavigate('up')}
-                className="w-full h-full flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 active:scale-90 transition-all cursor-pointer"
-                title="Select Poster Up"
-              >
-                <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-            </div>
-
-            {/* LEFT BUTTON */}
-            <div className="col-start-1 row-start-2 w-full h-full flex items-center justify-center">
-              <button
-                id="dpad-btn-left"
-                type="button"
-                onClick={() => handleNavigate('left')}
-                className="w-full h-full flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 active:scale-90 transition-all cursor-pointer"
-                title="Select Poster Left"
-              >
-                <ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-            </div>
-
-            {/* CENTER OK BUTTON */}
-            <div className="col-start-2 row-start-2 w-full h-full flex items-center justify-center">
-              <button
-                id="dpad-btn-ok"
-                type="button"
-                onClick={handlePlaySelected}
-                className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-[8px] sm:text-[9px] tracking-tight flex items-center justify-center shadow-md active:scale-90 transition-all cursor-pointer border border-amber-300"
-                title="Play Selected Movie (OK)"
-              >
-                OK
-              </button>
-            </div>
-
-            {/* RIGHT BUTTON */}
-            <div className="col-start-3 row-start-2 w-full h-full flex items-center justify-center">
-              <button
-                id="dpad-btn-right"
-                type="button"
-                onClick={() => handleNavigate('right')}
-                className="w-full h-full flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 active:scale-90 transition-all cursor-pointer"
-                title="Select Poster Right"
-              >
-                <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-            </div>
-
-            {/* DOWN BUTTON */}
-            <div className="col-start-2 row-start-3 w-full h-full flex items-center justify-center">
-              <button
-                id="dpad-btn-down"
-                type="button"
-                onClick={() => handleNavigate('down')}
-                className="w-full h-full flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 active:scale-90 transition-all cursor-pointer"
-                title="Select Poster Down"
-              >
-                <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {isLoading ? (
-            <span className="text-xs font-mono text-amber-400 bg-zinc-900/90 border border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-              <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-              Loading...
-            </span>
-          ) : (
-            <span className="text-xs font-mono text-zinc-400 bg-zinc-900/90 border border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
-              <Layers className="w-3 h-3 text-zinc-500" />
-              {items.length} titles loaded
-            </span>
-          )}
-        </div>
-      </div>
 
       {/* Initial Loading Skeletons */}
       {isLoading && items.length === 0 && (

@@ -16,7 +16,6 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  getDocFromServer,
   serverTimestamp 
 } from "firebase/firestore";
 import appletConfig from "../../firebase-applet-config.json";
@@ -47,6 +46,7 @@ export const db = (() => {
       : undefined;
     return initializeFirestore(app, {
       ignoreUndefinedProperties: true,
+      experimentalForceLongPolling: true,
     }, dbId);
   } catch {
     return appletConfig.firestoreDatabaseId && appletConfig.firestoreDatabaseId !== "(default)"
@@ -55,26 +55,19 @@ export const db = (() => {
   }
 })();
 
-// Test Firestore connection as required by Firebase skill
+// Test Firestore connection safely without throwing uncaught errors
 export async function checkFirebaseStatus(): Promise<{ connected: boolean; message: string }> {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDoc(doc(db, 'test', 'connection'));
     return { connected: true, message: 'Firebase Online' };
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      return { connected: false, message: 'Firebase Client Offline' };
+    if (error instanceof Error && (error.message.includes('offline') || error.message.includes('unavailable'))) {
+      return { connected: false, message: 'Firebase Offline Mode' };
     }
-    // Permission or other benign Firestore response means Firestore is reachable
+    // Permission or other Firestore responses indicate the server was reached
     return { connected: true, message: 'Firebase Active' };
   }
 }
-
-async function testConnection() {
-  try {
-    await checkFirebaseStatus();
-  } catch (_) {}
-}
-testConnection();
 
 // Save or update user profile & credentials in Firestore 'users' collection
 export async function syncUserToFirestore(
