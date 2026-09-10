@@ -78,8 +78,18 @@ export const DevicePairingModal: React.FC<DevicePairingModalProps> = ({
   if (!isOpen) return null;
 
   const displayUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}${window.location.pathname}?view=display`
-    : '?view=display';
+    ? (() => {
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.set('view', 'tv');
+          u.searchParams.set('room', pairingCode || '1000');
+          u.hash = '';
+          return u.toString();
+        } catch {
+          return `${window.location.origin}${window.location.pathname}?view=tv&room=${pairingCode || '1000'}`;
+        }
+      })()
+    : '?view=tv&room=1000';
 
   const isQuickConnected = pairingCode === QUICK_CONNECT_CODE;
 

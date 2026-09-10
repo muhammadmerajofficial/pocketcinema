@@ -45,6 +45,12 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
       welcomePage: 'off',
       autoplay: 'on',
     });
+  } else if (item.category === 'anime') {
+    playerUrl = currentServer.getAnimeUrl(item.id, season || 1, episode || 1, {
+      skin: 'onyx',
+      welcomePage: 'off',
+      autoplay: 'on',
+    });
   } else {
     playerUrl = currentServer.getTvUrl(item.id, season || 1, episode || 1, {
       skin: 'onyx',
@@ -416,6 +422,23 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
 
     return () => {
       if (wakeLockSentinel) wakeLockSentinel.release().catch(() => {});
+    };
+  }, []);
+
+  // Force play & 100% full volume on any user touch/click/keypress to bypass browser audio restrictions
+  useEffect(() => {
+    const handleGesture = () => {
+      sendCommandToIframe('volume', 100);
+      sendCommandToIframe('unmute');
+      sendCommandToIframe('play');
+    };
+    window.addEventListener('click', handleGesture);
+    window.addEventListener('keydown', handleGesture);
+    window.addEventListener('touchstart', handleGesture);
+    return () => {
+      window.removeEventListener('click', handleGesture);
+      window.removeEventListener('keydown', handleGesture);
+      window.removeEventListener('touchstart', handleGesture);
     };
   }, []);
 

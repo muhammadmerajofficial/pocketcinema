@@ -64,7 +64,7 @@ export function buildEmbedMasterQuery(opts?: PlayerOptions): string {
   const skin = opts?.skin || 'onyx';
   const welcome = opts?.welcomePage || 'off';
   const autoplay = opts?.autoplay || 'on';
-  let q = `?skin=${encodeURIComponent(skin)}&welcome_page=${encodeURIComponent(welcome)}&autoplay=${encodeURIComponent(autoplay)}`;
+  let q = `?skin=${encodeURIComponent(skin)}&welcome_page=${encodeURIComponent(welcome)}&autoplay=${encodeURIComponent(autoplay)}&auto_play=1&volume=100`;
   if (typeof window !== 'undefined' && window.location?.origin) {
     q += `&referrer=${encodeURIComponent(window.location.origin)}`;
   }
@@ -89,43 +89,43 @@ export const ALL_PLAYER_SERVERS: PlayerServer[] = [
   {
     id: 'cinemaos-in',
     name: 'CinemaOS.in',
-    getMovieUrl: (id) => `https://cinemaos.in/movie/watch/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://cinemaos.in/tv/watch/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://cinemaos.in/tv/watch/${formatEmbedMasterId(id)}/${s}/${e}`,
+    getMovieUrl: (id) => `https://cinemaos.in/movie/watch/${formatEmbedMasterId(id)}?autoplay=1&auto_play=1&volume=100`,
+    getTvUrl: (id, s, e) => `https://cinemaos.in/tv/watch/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1&auto_play=1&volume=100`,
+    getAnimeUrl: (id, s, e) => `https://cinemaos.in/tv/watch/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1&auto_play=1&volume=100`,
   },
   {
     id: 'peachify',
     name: 'Peachify.top',
-    getMovieUrl: (id) => `https://peachify.top/embed/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://peachify.top/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://peachify.top/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
+    getMovieUrl: (id) => `https://peachify.top/embed/movie/${formatEmbedMasterId(id)}?autoplay=1`,
+    getTvUrl: (id, s, e) => `https://peachify.top/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
+    getAnimeUrl: (id, s, e) => `https://peachify.top/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
   },
   {
     id: 'boredflix',
     name: 'BoredFlix.cc',
-    getMovieUrl: (id) => `https://boredflix.cc/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://boredflix.cc/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://boredflix.cc/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
+    getMovieUrl: (id) => `https://boredflix.cc/movie/${formatEmbedMasterId(id)}?autoplay=1`,
+    getTvUrl: (id, s, e) => `https://boredflix.cc/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
+    getAnimeUrl: (id, s, e) => `https://boredflix.cc/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
   },
   {
     id: 'vidrock',
     name: 'VidRock.ru',
-    getMovieUrl: (id) => `https://vidrock.ru/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://vidrock.ru/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://vidrock.ru/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
+    getMovieUrl: (id) => `https://vidrock.ru/movie/${formatEmbedMasterId(id)}?autoplay=1`,
+    getTvUrl: (id, s, e) => `https://vidrock.ru/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
+    getAnimeUrl: (id, s, e) => `https://vidrock.ru/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
   },
   {
     id: 'vidsrc',
     name: 'VidSrc.tw',
-    getMovieUrl: (id) => `https://vidsrc.tw/embed/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://vidsrc.tw/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://vidsrc.tw/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
+    getMovieUrl: (id) => `https://vidsrc.tw/embed/movie/${formatEmbedMasterId(id)}?autoplay=1`,
+    getTvUrl: (id, s, e) => `https://vidsrc.tw/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
+    getAnimeUrl: (id, s, e) => `https://vidsrc.tw/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
   },
   {
     id: 'autoembed',
     name: 'AutoEmbed.cc',
-    getMovieUrl: (id) => `https://player.autoembed.cc/embed/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://player.autoembed.cc/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://player.autoembed.cc/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
+    getMovieUrl: (id) => `https://player.autoembed.cc/embed/movie/${formatEmbedMasterId(id)}?autoplay=1`,
+    getTvUrl: (id, s, e) => `https://player.autoembed.cc/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
+    getAnimeUrl: (id, s, e) => `https://player.autoembed.cc/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}?autoplay=1`,
   },
 ];

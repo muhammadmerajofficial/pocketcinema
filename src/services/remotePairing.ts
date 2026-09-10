@@ -88,31 +88,25 @@ export async function connectToRoom(roomCode: string): Promise<{ success: boolea
     const snap = await getDoc(roomRef);
 
     if (!snap.exists()) {
-      // Auto-create room so remote can pair even if player just started
-      const newRoom: RoomData = {
-        roomCode: cleanCode,
-        isPlaying: false,
-        currentTime: 0,
-        action: 'none',
-        volume: 1,
-        status: 'connected',
-        playingItem: null,
-        serverIndex: 0,
-        season: 1,
-        episode: 1,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      return { 
+        success: false, 
+        message: `Room #${cleanCode} not found or inactive. Please open TV Screen for an active room code.` 
       };
-      await setDoc(roomRef, sanitizeFirestoreData(newRoom));
-      try {
-        localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
-      } catch (_) {}
-      return { success: true, data: newRoom, message: `Connected to TV Room #${cleanCode}` };
     }
 
     const existingData = snap.data() as RoomData;
+    if (existingData.status === 'closed') {
+      return {
+        success: false,
+        message: `Room #${cleanCode} was closed. Please open TV Screen to get a new active room code.`
+      };
+    }
+
     await setDoc(roomRef, {
       status: 'connected',
+      action: 'play',
+      isPlaying: true,
+      volume: 100,
       updatedAt: serverTimestamp(),
     }, { merge: true });
 
@@ -120,28 +114,22 @@ export async function connectToRoom(roomCode: string): Promise<{ success: boolea
       localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
     } catch (_) {}
 
+    syncManager.broadcast({
+      type: 'ROOM_UPDATE',
+      roomCode: cleanCode,
+      data: { status: 'connected', action: 'play', isPlaying: true, volume: 100 }
+    } as any);
+
     return { 
       success: true, 
-      data: { ...existingData, status: 'connected' }, 
+      data: { ...existingData, status: 'connected', action: 'play', isPlaying: true, volume: 100 }, 
       message: `Connected to TV Room #${cleanCode}` 
     };
   } catch (err: any) {
     console.warn('[connectToRoom] Error:', err);
-    // Allow local connection
-    try {
-      localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
-    } catch (_) {}
     return { 
-      success: true, 
-      data: {
-        roomCode: cleanCode,
-        isPlaying: false,
-        currentTime: 0,
-        action: 'none',
-        volume: 1,
-        status: 'connected',
-      }, 
-      message: `Connected to TV Room #${cleanCode}` 
+      success: false, 
+      message: `Connection failed: ${err?.message || 'TV Screen not found'}` 
     };
   }
 }
@@ -202,7 +190,7 @@ export function listenToRoom(roomCode: string, onUpdate: (data: RoomData | null)
  */
 export async function closeRoom(roomCode: string): Promise<void> {
   if (!roomCode) return;
-  const cleanCode = roomCode.trim();
+  const cleanCode = roomCode.trim().replace(/\D/g, '');
   try {
     const roomRef = doc(db, 'rooms', cleanCode);
     await setDoc(roomRef, {
@@ -219,6 +207,17 @@ export async function closeRoom(roomCode: string): Promise<void> {
   try {
     localStorage.removeItem(LOCAL_ROOM_CODE_KEY);
   } catch (_) {}
+
+  // Broadcast immediate disconnection to all remote tabs and sync listeners
+  syncManager.broadcast({
+    type: 'ROOM_UPDATE',
+    roomCode: cleanCode,
+    data: { status: 'closed', action: 'close', isPlaying: false, playingItem: null }
+  } as any);
+  syncManager.broadcast({
+    type: 'DISCONNECT',
+    timestamp: Date.now()
+  });
 }
 
 export interface RemoteSessionData {
