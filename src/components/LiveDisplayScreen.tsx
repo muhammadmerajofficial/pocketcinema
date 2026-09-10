@@ -344,7 +344,72 @@ export const LiveDisplayScreen: React.FC = () => {
         </div>
       )}
 
-      {/* 3. FULL-SCREEN QR CODE & ROOM ID PAIRING DISPLAY (Active until Remote pairs) */}
+      {/* 3. ALWAYS-VISIBLE TOP-RIGHT ROOM ID POPUP BADGE */}
+      {/* Persists even after code is active and remote is controlling the player */}
+      <div 
+        id="tv-top-right-room-badge"
+        className="fixed top-4 right-4 z-[10002] flex items-center gap-2 pointer-events-auto select-none animate-fadeIn"
+      >
+        <div 
+          className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-black/85 backdrop-blur-xl border border-amber-500/60 shadow-[0_4px_30px_rgba(0,0,0,0.85)] transition-all hover:bg-black/95 hover:border-amber-400"
+        >
+          {/* Status Indicator Pulse */}
+          <div className="flex items-center gap-1.5">
+            <span 
+              className={`w-2.5 h-2.5 rounded-full ${
+                isConnected 
+                  ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)] animate-pulse' 
+                  : 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.9)] animate-ping'
+              }`} 
+            />
+          </div>
+
+          {/* Room ID Title and Value */}
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[10px] sm:text-xs font-mono font-bold text-zinc-400 uppercase tracking-wider">
+              ROOM ID:
+            </span>
+            <span className="text-base sm:text-lg font-mono font-black tracking-widest text-amber-400">
+              #{roomCode}
+            </span>
+          </div>
+
+          {/* Active / Linked Badge */}
+          {isConnected ? (
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              ACTIVE
+            </span>
+          ) : (
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              PAIRING
+            </span>
+          )}
+
+          {/* Copy Button */}
+          <button
+            type="button"
+            onClick={handleCopyCode}
+            className="p-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+            title="Copy Room ID"
+          >
+            {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-zinc-400" />}
+          </button>
+
+          {/* Toggle QR Overlay Button */}
+          {!isQROverlayOpen && (
+            <button
+              type="button"
+              onClick={() => setIsQROverlayOpen(true)}
+              className="p-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 transition-colors cursor-pointer border border-amber-500/30"
+              title="Show Full QR Code"
+            >
+              <QrCode className="w-3.5 h-3.5 text-amber-400" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 4. FULL-SCREEN QR CODE & ROOM ID PAIRING DISPLAY (Active until Remote pairs) */}
       {/* Covers 100% full screen with large QR and Room ID; hides automatically when Remote activates */}
       {isQROverlayOpen && (
         <div 
