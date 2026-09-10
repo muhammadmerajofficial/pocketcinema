@@ -166,23 +166,37 @@ export default function App() {
             msg: `Connected to TV Room #${clean}!`
           });
 
-          // Auto play default selected movie with 100% volume
-          const defaultItem = (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0];
-          if (defaultItem) {
-            handlePlayMedia(defaultItem, 1, 1);
+          // If TV already has a movie playing in the background, adopt it so it continues uninterrupted!
+          if (res.data.playingItem) {
+            setPlayingMedia(res.data.playingItem);
+            setIsRemotePlaying(true);
             setRemoteVolume(100);
             updateRoom(clean, {
               status: 'connected',
-              playingItem: defaultItem,
-              isPlaying: true,
               action: 'play',
+              isPlaying: true,
               volume: 100,
-              currentTime: 0,
-              serverIndex: 0,
-              season: 1,
-              episode: 1,
               lastCommandTimestamp: Date.now(),
             });
+          } else {
+            // Auto play default selected movie with 100% volume if TV had no item
+            const defaultItem = (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0];
+            if (defaultItem) {
+              handlePlayMedia(defaultItem, 1, 1);
+              setRemoteVolume(100);
+              updateRoom(clean, {
+                status: 'connected',
+                playingItem: defaultItem,
+                isPlaying: true,
+                action: 'play',
+                volume: 100,
+                currentTime: 0,
+                serverIndex: 0,
+                season: 1,
+                episode: 1,
+                lastCommandTimestamp: Date.now(),
+              });
+            }
           }
         }
       });
@@ -211,6 +225,7 @@ export default function App() {
 
       if (data.status === 'closed') {
         setPairingCode('');
+        setMainPageCodeInput('');
         setPlayingMedia(null);
         setIsRemotePlaying(false);
         try {
@@ -252,6 +267,7 @@ export default function App() {
     const unsub = syncManager.subscribe((msg: SyncMessage) => {
       if (msg.type === 'DISCONNECT') {
         setPairingCode('');
+        setMainPageCodeInput('');
         setPlayingMedia(null);
         setIsRemotePlaying(false);
         try {
@@ -265,6 +281,7 @@ export default function App() {
         const updateData = (msg as any).data;
         if (updateData?.status === 'closed') {
           setPairingCode('');
+          setMainPageCodeInput('');
           setPlayingMedia(null);
           setIsRemotePlaying(false);
           try {
@@ -355,23 +372,37 @@ export default function App() {
         });
         setMainPageCodeInput('');
 
-        // Auto-play selected or focused movie on TV with 100% volume
-        const targetItem = playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0];
-        if (targetItem) {
-          handlePlayMedia(targetItem, playerSeason, playerEpisode);
+        // If TV screen already has a movie playing in the background, adopt it so it continues uninterrupted!
+        if (res.data.playingItem) {
+          setPlayingMedia(res.data.playingItem);
+          setIsRemotePlaying(true);
           setRemoteVolume(100);
           updateRoom(res.data.roomCode, {
             status: 'connected',
-            playingItem: targetItem,
-            isPlaying: true,
             action: 'play',
+            isPlaying: true,
             volume: 100,
-            currentTime: 0,
-            serverIndex: playerServerIndex,
-            season: playerSeason,
-            episode: playerEpisode,
             lastCommandTimestamp: Date.now(),
           });
+        } else {
+          // If TV had no item playing, auto-play selected or focused movie with full sound
+          const targetItem = playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0];
+          if (targetItem) {
+            handlePlayMedia(targetItem, playerSeason, playerEpisode);
+            setRemoteVolume(100);
+            updateRoom(res.data.roomCode, {
+              status: 'connected',
+              playingItem: targetItem,
+              isPlaying: true,
+              action: 'play',
+              volume: 100,
+              currentTime: 0,
+              serverIndex: playerServerIndex,
+              season: playerSeason,
+              episode: playerEpisode,
+              lastCommandTimestamp: Date.now(),
+            });
+          }
         }
       } else {
         soundFx.playClick('switch');
