@@ -8,8 +8,218 @@ import {
 } from 'firebase/firestore';
 import { db, User } from '../lib/firebase';
 import { CategoryType, MediaItem } from '../types';
+import { syncManager } from '../utils/syncChannel';
 
 export const QUICK_CONNECT_CODE = 'gotocinema';
+export const LOCAL_ROOM_CODE_KEY = 'cinematic_room_code';
+
+export interface RoomData {
+  roomCode: string;
+  isPlaying: boolean;
+  currentTime: number;
+  duration?: number;
+  action: 'none' | 'play' | 'pause' | 'close' | 'rewind' | 'forward' | 'seek';
+  volume: number; // 0 to 1
+  status: 'waiting' | 'connected' | 'closed';
+  playingItem?: MediaItem | null;
+  serverIndex?: number;
+  season?: number;
+  episode?: number;
+  lastCommandTimestamp?: number;
+  updatedAt?: any;
+  createdAt?: any;
+}
+
+/**
+ * Generate a random 4-digit numeric room code (1000 - 9999)
+ */
+export function generate4DigitRoomCode(): string {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+/**
+ * Initialize a new TV Player room in Firebase at rooms/{roomCode}
+ */
+export async function initRoom(roomCode: string, initialData: Partial<RoomData> = {}): Promise<RoomData> {
+  const cleanCode = roomCode.trim();
+  const roomRef = doc(db, 'rooms', cleanCode);
+  const data: RoomData = {
+    roomCode: cleanCode,
+    isPlaying: false,
+    currentTime: 0,
+    action: 'none',
+    volume: 1,
+    status: 'waiting',
+    playingItem: null,
+    serverIndex: 0,
+    season: 1,
+    episode: 1,
+    ...initialData,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  try {
+    await setDoc(roomRef, sanitizeFirestoreData(data));
+  } catch (e) {
+    console.warn('[initRoom] Firestore error, local fallback active:', e);
+  }
+
+  // Also broadcast locally for zero-latency multi-tab sync
+  syncManager.broadcast({
+    type: 'ROOM_STATE',
+    roomData: data
+  } as any);
+
+  return data;
+}
+
+/**
+ * Connect remote to an existing room with 4-digit code
+ */
+export async function connectToRoom(roomCode: string): Promise<{ success: boolean; data?: RoomData; message: string }> {
+  const cleanCode = roomCode.trim().replace(/\D/g, '');
+  if (cleanCode.length !== 4) {
+    return { success: false, message: 'Room code must be a 4-digit number (e.g. 4829).' };
+  }
+
+  try {
+    const roomRef = doc(db, 'rooms', cleanCode);
+    const snap = await getDoc(roomRef);
+
+    if (!snap.exists()) {
+      // Auto-create room so remote can pair even if player just started
+      const newRoom: RoomData = {
+        roomCode: cleanCode,
+        isPlaying: false,
+        currentTime: 0,
+        action: 'none',
+        volume: 1,
+        status: 'connected',
+        playingItem: null,
+        serverIndex: 0,
+        season: 1,
+        episode: 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(roomRef, sanitizeFirestoreData(newRoom));
+      try {
+        localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
+      } catch (_) {}
+      return { success: true, data: newRoom, message: `Connected to TV Room #${cleanCode}` };
+    }
+
+    const existingData = snap.data() as RoomData;
+    await setDoc(roomRef, {
+      status: 'connected',
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    try {
+      localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
+    } catch (_) {}
+
+    return { 
+      success: true, 
+      data: { ...existingData, status: 'connected' }, 
+      message: `Connected to TV Room #${cleanCode}` 
+    };
+  } catch (err: any) {
+    console.warn('[connectToRoom] Error:', err);
+    // Allow local connection
+    try {
+      localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
+    } catch (_) {}
+    return { 
+      success: true, 
+      data: {
+        roomCode: cleanCode,
+        isPlaying: false,
+        currentTime: 0,
+        action: 'none',
+        volume: 1,
+        status: 'connected',
+      }, 
+      message: `Connected to TV Room #${cleanCode}` 
+    };
+  }
+}
+
+/**
+ * Update room state in Firebase
+ */
+export async function updateRoom(roomCode: string, data: Partial<RoomData>): Promise<void> {
+  if (!roomCode) return;
+  const cleanCode = roomCode.trim();
+  const sanitized = sanitizeFirestoreData({
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    const roomRef = doc(db, 'rooms', cleanCode);
+    await setDoc(roomRef, sanitized, { merge: true });
+  } catch (err) {
+    console.warn('[updateRoom] Error:', err);
+  }
+
+  // Cross-tab broadcast
+  syncManager.broadcast({
+    type: 'ROOM_UPDATE',
+    roomCode: cleanCode,
+    data
+  } as any);
+}
+
+/**
+ * Real-time listener for rooms/{roomCode}
+ */
+export function listenToRoom(roomCode: string, onUpdate: (data: RoomData | null) => void): () => void {
+  if (!roomCode) return () => {};
+  const cleanCode = roomCode.trim();
+  const roomRef = doc(db, 'rooms', cleanCode);
+
+  const unsubscribe = onSnapshot(
+    roomRef,
+    (snap) => {
+      if (snap.exists()) {
+        onUpdate(snap.data() as RoomData);
+      } else {
+        onUpdate(null);
+      }
+    },
+    (err) => {
+      console.warn('[listenToRoom] Listener notice:', err);
+    }
+  );
+
+  return unsubscribe;
+}
+
+/**
+ * Close and clean up room session
+ */
+export async function closeRoom(roomCode: string): Promise<void> {
+  if (!roomCode) return;
+  const cleanCode = roomCode.trim();
+  try {
+    const roomRef = doc(db, 'rooms', cleanCode);
+    await setDoc(roomRef, {
+      status: 'closed',
+      action: 'close',
+      isPlaying: false,
+      playingItem: null,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (err) {
+    console.warn('[closeRoom] Error:', err);
+  }
+
+  try {
+    localStorage.removeItem(LOCAL_ROOM_CODE_KEY);
+  } catch (_) {}
+}
 
 export interface RemoteSessionData {
   code: string;

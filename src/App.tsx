@@ -4,7 +4,6 @@ import {
   VolumeX, 
   Tv2, 
   Bookmark, 
-  User as UserIcon,
   ArrowUp,
   Radio,
   Eye,
@@ -12,15 +11,16 @@ import {
   X,
   Camera,
   ExternalLink,
-  KeyRound,
   Sparkles,
   Layers,
   Loader2,
   ArrowRight,
   Unplug,
-  RefreshCw
+  RefreshCw,
+  QrCode
 } from 'lucide-react';
 import { CategoryType, MediaItem } from './types';
+import { MEDIA_COLLECTION } from './data/mediaData';
 import { loadCategoryMedia } from './services/api';
 import { RemoteTopNav } from './components/RemoteTopNav';
 import { RemoteSearchBar } from './components/RemoteSearchBar';
@@ -29,33 +29,44 @@ import { TimelineView } from './components/TimelineView';
 import { PosterSelectorDpad } from './components/PosterSelectorDpad';
 import { MediaDetailModal } from './components/MediaDetailModal';
 import { MainPageControlBar } from './components/MainPageControlBar';
-import { AuthModal } from './components/AuthModal';
+import { ConnectedRemotePanel } from './components/ConnectedRemotePanel';
 import { QRScannerModal } from './components/QRScannerModal';
 import { LiveDisplayScreen } from './components/LiveDisplayScreen';
-import { DevicePairingModal } from './components/DevicePairingModal';
-import { auth, onAuthStateChanged, type User } from './lib/firebase';
 import { soundFx } from './utils/sound';
 import { syncManager } from './utils/syncChannel';
 import { 
-  getOrCreateUserSession, 
-  updateRemoteSession, 
-  disconnectRemoteSession, 
-  QUICK_CONNECT_CODE, 
-  sendRemoteHeartbeat, 
-  disconnectQuickNetworkRemote, 
-  getDeviceSessionId, 
-  listenToRemoteSession,
-  connectRemoteWithCode
+  connectToRoom, 
+  updateRoom, 
+  listenToRoom, 
+  closeRoom, 
+  RoomData, 
+  generate4DigitRoomCode 
 } from './services/remotePairing';
 
 export default function App() {
-  // Check if opened in dedicated Live Display mode (?view=display, ?view=screen, ?view=remote, ?view=iframe)
+  // Check if opened in dedicated Live Display mode (/tv, ?view=display, ?view=screen, ?view=player)
   const isDisplayView = typeof window !== 'undefined' && (
+    window.location.pathname.toLowerCase() === '/tv' ||
+    window.location.pathname.toLowerCase() === '/tv/' ||
+    window.location.pathname.toLowerCase().endsWith('/tv') ||
+    window.location.pathname.toLowerCase().endsWith('/tv/') ||
+    new URLSearchParams(window.location.search).get('view') === 'tv' ||
     new URLSearchParams(window.location.search).get('view') === 'display' ||
     new URLSearchParams(window.location.search).get('view') === 'screen' ||
-    new URLSearchParams(window.location.search).get('view') === 'remote' ||
-    new URLSearchParams(window.location.search).get('view') === 'iframe'
+    new URLSearchParams(window.location.search).get('view') === 'player' ||
+    window.location.pathname.endsWith('/player')
   );
+
+  // Normalize TV screen URL to clean /tv without messy query parameters
+  useEffect(() => {
+    if (isDisplayView && window.location.pathname !== '/tv') {
+      try {
+        window.history.replaceState({}, '', '/tv');
+      } catch {
+        // Ignore in restricted environments
+      }
+    }
+  }, [isDisplayView]);
 
   const [activeCategory, setActiveCategory] = useState<CategoryType>('movies');
   const [searchQuery, setSearchQuery] = useState('');
@@ -69,21 +80,33 @@ export default function App() {
   const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(null);
   const [isPlayerHidden, setIsPlayerHidden] = useState(false);
   const [isScreenLocked, setIsScreenLocked] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
   const [lastRemoteAction, setLastRemoteAction] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+
+  // 4-digit Room Code pairing state
   const [pairingCode, setPairingCode] = useState<string>(() => {
     try {
-      return localStorage.getItem('cinematic_remote_pairing_code') || '';
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromUrl = urlParams.get('room') || urlParams.get('code');
+      if (fromUrl && fromUrl.trim().length === 4) {
+        return fromUrl.trim();
+      }
+      return localStorage.getItem('cinematic_remote_room_code') || '';
     } catch {
       return '';
     }
   });
-  const [isPairingModalOpen, setIsPairingModalOpen] = useState(false);
-  const [mainPageCodeInput, setMainPageCodeInput] = useState<string>('');
+
+  const [isRemotePlaying, setIsRemotePlaying] = useState<boolean>(false);
+  const [remoteVolume, setRemoteVolume] = useState<number>(100);
+  const [mainPageCodeInput, setMainPageCodeInput] = useState<string>(() => {
+    try {
+      return localStorage.getItem('cinematic_remote_room_code') || '';
+    } catch {
+      return '';
+    }
+  });
   const [isConnectingMainPage, setIsConnectingMainPage] = useState<boolean>(false);
   const [mainPageConnectFeedback, setMainPageConnectFeedback] = useState<{ success: boolean; msg: string } | null>(null);
 
@@ -91,269 +114,337 @@ export default function App() {
   const [playerServerIndex, setPlayerServerIndex] = useState(0);
   const [playerSeason, setPlayerSeason] = useState(1);
   const [playerEpisode, setPlayerEpisode] = useState(1);
-  const [playerRemoteAction, setPlayerRemoteAction] = useState<{ action: 'play' | 'preview' | 'next'; timestamp: number } | null>(null);
+
+  // Synchronized refs to avoid re-triggering effects on state updates
+  const pairingCodeRef = useRef(pairingCode);
+  pairingCodeRef.current = pairingCode;
+
+  const playingMediaRef = useRef(playingMedia);
+  playingMediaRef.current = playingMedia;
+
+  const playerServerIndexRef = useRef(playerServerIndex);
+  playerServerIndexRef.current = playerServerIndex;
+
+  const autoPlayCategoryChangeRef = useRef(false);
+
+  // Sync mainPageCodeInput whenever pairingCode changes
+  useEffect(() => {
+    if (pairingCode) {
+      setMainPageCodeInput(pairingCode);
+    }
+  }, [pairingCode]);
+
+  // Auto-connect if URL has ?room=XXXX or ?code=XXXX on mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomParam = urlParams.get('room') || urlParams.get('code');
+    if (roomParam && roomParam.trim().length === 4) {
+      const clean = roomParam.trim();
+      connectToRoom(clean).then((res) => {
+        if (res.success && res.data) {
+          setPairingCode(clean);
+          setMainPageConnectFeedback({
+            success: true,
+            msg: `Connected to TV Room #${clean}!`
+          });
+
+          // Auto play default selected movie with 100% volume
+          const defaultItem = (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0];
+          if (defaultItem) {
+            handlePlayMedia(defaultItem, 1, 1);
+            setRemoteVolume(100);
+            updateRoom(clean, {
+              status: 'connected',
+              playingItem: defaultItem,
+              isPlaying: true,
+              action: 'play',
+              volume: 100,
+              currentTime: 0,
+              serverIndex: 0,
+              season: 1,
+              episode: 1,
+              lastCommandTimestamp: Date.now(),
+            });
+          }
+        }
+      });
+    }
+  }, []);
+
+  // Sync active room code to localStorage
+  useEffect(() => {
+    if (pairingCode) {
+      try {
+        localStorage.setItem('cinematic_remote_room_code', pairingCode);
+      } catch (_) {}
+    } else {
+      try {
+        localStorage.removeItem('cinematic_remote_room_code');
+      } catch (_) {}
+    }
+  }, [pairingCode]);
+
+  // Real-time listener for the connected TV Room
+  useEffect(() => {
+    if (!pairingCode || pairingCode.length !== 4) return;
+
+    const unsubscribe = listenToRoom(pairingCode, (data: RoomData | null) => {
+      if (!data) return;
+
+      if (data.status === 'closed') {
+        setPairingCode('');
+        setPlayingMedia(null);
+        setIsRemotePlaying(false);
+        setMainPageConnectFeedback({
+          success: false,
+          msg: 'TV Room session was closed by the player.'
+        });
+        return;
+      }
+
+      if ('isPlaying' in data && typeof data.isPlaying === 'boolean') {
+        setIsRemotePlaying(data.isPlaying);
+      }
+
+      if (typeof data.volume === 'number') {
+        setRemoteVolume(data.volume);
+      }
+
+      if ('playingItem' in data) {
+        setPlayingMedia((prev) => {
+          if (!data.playingItem && !prev) return null;
+          if (data.playingItem && prev && data.playingItem.id === prev.id) {
+            return prev;
+          }
+          return data.playingItem || null;
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [pairingCode]);
 
   // Centralized robust Play Trigger for TV and remote
-  const handlePlayMedia = (item: MediaItem, season = 1, episode = 1) => {
+  const handlePlayMedia = useCallback((item: MediaItem, season = 1, episode = 1) => {
     if (isScreenLocked) return;
     soundFx.playClick('ok');
     setPlayingMedia(item);
     setIsPlayerHidden(false);
+    setIsRemotePlaying(true);
+    setRemoteVolume(100);
     setPlayerSeason(season);
     setPlayerEpisode(episode);
 
     const now = Date.now();
+    const currentServerIndex = playerServerIndexRef.current;
     // 1. Local state & BroadcastChannel
     syncManager.saveState({
       playingItem: item,
-      serverIndex: playerServerIndex,
+      serverIndex: currentServerIndex,
       season,
       episode,
     });
     syncManager.broadcast({
       type: 'PLAY',
       item,
-      serverIndex: playerServerIndex,
+      serverIndex: currentServerIndex,
       season,
       episode,
     });
 
-    // 2. Firebase live dispatch to TV Display
-    const activeCode = pairingCode || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_pairing_code') : '') || '';
-    if (activeCode) {
-      console.log('[Remote] Sending PLAY command to TV:', item.title, 'Code:', activeCode);
-      updateRemoteSession(activeCode, {
+    // 2. Firebase live dispatch to TV Display Room
+    const currentCode = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
+    if (currentCode) {
+      updateRoom(currentCode, {
+        status: 'connected',
         playingItem: item,
-        serverIndex: playerServerIndex,
+        isPlaying: true,
+        action: 'play',
+        volume: 100,
+        currentTime: 0,
+        serverIndex: currentServerIndex,
         season,
         episode,
-        playerCommand: { command: 'play', timestamp: now },
-        playerStatus: {
-          isPlaying: true,
-          currentTime: 0,
-          duration: 0,
-          volume: 100,
-          isMuted: false,
-          timestamp: now,
-        },
+        lastCommandTimestamp: now,
       });
     }
-  };
+  }, [isScreenLocked]);
 
-  // Direct connect from Main Remote page (supporting alphanumeric codes, gotocinema, and 6-digit codes)
-  const handleMainPageConnect = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const clean = mainPageCodeInput.trim();
-    if (!clean) return;
+  const handlePlayMediaRef = useRef(handlePlayMedia);
+  handlePlayMediaRef.current = handlePlayMedia;
+
+  // Direct connect handler for 4-digit Room Code
+  const handleConnectRoomCode = async (code: string) => {
+    const clean = code.trim();
+    if (!clean || clean.length !== 4) {
+      setMainPageConnectFeedback({
+        success: false,
+        msg: 'Please enter a 4-digit numeric room code (e.g. 4829).'
+      });
+      return;
+    }
 
     setIsConnectingMainPage(true);
     setMainPageConnectFeedback(null);
     soundFx.playClick('switch');
 
     try {
-      const res = await connectRemoteWithCode(clean);
-      if (res.success) {
+      const res = await connectToRoom(clean);
+      if (res.success && res.data) {
         soundFx.playClick('ok');
-        setPairingCode(res.code);
+        setPairingCode(res.data.roomCode);
         setMainPageConnectFeedback({
           success: true,
-          msg: `Connected to TV Display (${res.code})!`
+          msg: `Connected to TV Room #${res.data.roomCode}!`
         });
         setMainPageCodeInput('');
+
+        // Auto-play default selected movie on TV with 100% volume
+        const defaultItem = (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0];
+        if (defaultItem) {
+          handlePlayMedia(defaultItem, 1, 1);
+          setRemoteVolume(100);
+          updateRoom(res.data.roomCode, {
+            status: 'connected',
+            playingItem: defaultItem,
+            isPlaying: true,
+            action: 'play',
+            volume: 100,
+            currentTime: 0,
+            serverIndex: playerServerIndex,
+            season: 1,
+            episode: 1,
+            lastCommandTimestamp: Date.now(),
+          });
+        }
       } else {
         soundFx.playClick('switch');
         setMainPageConnectFeedback({
           success: false,
-          msg: res.error || 'Failed to connect to TV.'
+          msg: res.message || 'Room not found. Check code on your TV.'
         });
       }
     } catch (err: any) {
       soundFx.playClick('switch');
       setMainPageConnectFeedback({
         success: false,
-        msg: err?.message || 'Error connecting to TV.'
+        msg: err?.message || 'Error connecting to TV Room.'
       });
     } finally {
       setIsConnectingMainPage(false);
     }
   };
 
-  const handleMainPageDisconnect = async () => {
-    soundFx.playClick('switch');
-    if (!pairingCode) return;
-    try {
-      if (pairingCode === QUICK_CONNECT_CODE) {
-        await disconnectQuickNetworkRemote();
-      } else {
-        await disconnectRemoteSession(pairingCode);
-      }
-      setPairingCode('');
-      setMainPageConnectFeedback({
-        success: true,
-        msg: 'Disconnected from TV Display.'
+  const handleMainPageConnect = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    await handleConnectRoomCode(mainPageCodeInput);
+  };
+
+  // Remote Control Deck Actions
+  const handleTogglePlayPause = () => {
+    const nextPlaying = !isRemotePlaying;
+    setIsRemotePlaying(nextPlaying);
+    if (pairingCode) {
+      updateRoom(pairingCode, {
+        isPlaying: nextPlaying,
+        action: nextPlaying ? 'play' : 'pause',
+        lastCommandTimestamp: Date.now()
       });
-      setTimeout(() => setMainPageConnectFeedback(null), 3000);
-    } catch (err) {
-      console.warn('Disconnect error:', err);
     }
   };
 
-  // Sync pairing code with localStorage
-  useEffect(() => {
+  const handleRewind10 = () => {
+    const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
+    const ts = Date.now();
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'rewind',
+      extra: -10,
+      timestamp: ts,
+    });
+    if (code) {
+      updateRoom(code, {
+        action: 'rewind',
+        lastCommandTimestamp: ts,
+      });
+    }
+  };
+
+  const handleForward10 = () => {
+    const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
+    const ts = Date.now();
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'forward',
+      extra: 10,
+      timestamp: ts,
+    });
+    if (code) {
+      updateRoom(code, {
+        action: 'forward',
+        lastCommandTimestamp: ts,
+      });
+    }
+  };
+
+  const handleSeekTime = (seconds: number) => {
+    const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
+    const ts = Date.now();
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'seek',
+      value: seconds,
+      timestamp: ts,
+    });
+    if (code) {
+      updateRoom(code, {
+        action: 'seek',
+        currentTime: seconds,
+        lastCommandTimestamp: ts,
+      });
+    }
+  };
+
+  const handlePlaySeasonEpisode = (seasonNum: number, episodeNum: number) => {
+    const targetItem = playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null);
+    if (targetItem) {
+      handlePlayMedia(targetItem, seasonNum, episodeNum);
+    }
+  };
+
+  const handleCloseSession = () => {
+    soundFx.playClick('switch');
+    setPlayingMedia(null);
+    setIsRemotePlaying(false);
+    syncManager.broadcast({ type: 'CLOSE_PLAYER' });
+    const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
+    if (code) {
+      updateRoom(code, {
+        action: 'close',
+        isPlaying: false,
+        playingItem: null,
+        lastCommandTimestamp: Date.now(),
+      });
+    }
+  };
+
+  const handleDisconnectRemote = () => {
+    soundFx.playClick('switch');
     if (pairingCode) {
-      try {
-        localStorage.setItem('cinematic_remote_pairing_code', pairingCode);
-      } catch (_) {}
-    } else {
-      try {
-        localStorage.removeItem('cinematic_remote_pairing_code');
-      } catch (_) {}
+      closeRoom(pairingCode);
     }
-  }, [pairingCode]);
-
-  // Quick Connect (gotocinema) Remote Heartbeat & Session Monitor
-  useEffect(() => {
-    if (pairingCode !== QUICK_CONNECT_CODE) return;
-
-    // Send initial remote heartbeat and keep-alive
-    sendRemoteHeartbeat();
-    const heartbeatInterval = setInterval(() => {
-      sendRemoteHeartbeat();
-    }, 8000);
-
-    // Listen to session: only disconnect if display explicitly disconnected
-    const unsubscribe = listenToRemoteSession(QUICK_CONNECT_CODE, (data) => {
-      if (!data) return;
-      if (data.displayActive === false && data.isActive === false && data.disconnectedAt) {
-        console.log('[Remote] Display was explicitly closed.');
-        setPairingCode('');
-      }
+    setPairingCode('');
+    setPlayingMedia(null);
+    setIsRemotePlaying(false);
+    setMainPageConnectFeedback({
+      success: true,
+      msg: 'Disconnected from TV Display.'
     });
+    setTimeout(() => setMainPageConnectFeedback(null), 3000);
+  };
 
-    return () => {
-      clearInterval(heartbeatInterval);
-      unsubscribe();
-    };
-  }, [pairingCode]);
-
-  // Listen to Firebase Auth state & retrieve/create pairing code stored with Gmail
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      if (user) {
-        getOrCreateUserSession(user)
-          .then((code) => {
-            // Only set if not already quick-connected
-            setPairingCode((prev) => (prev === QUICK_CONNECT_CODE ? prev : code));
-            try {
-              localStorage.setItem('cinematic_remote_pairing_code', code);
-            } catch (_) {}
-          })
-          .catch((err) => console.warn('[RemotePairing] Code init warning:', err));
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 1. Synchronize currently selected item with Live Display Screen (BroadcastChannel + Firebase)
-  useEffect(() => {
-    if (mediaItems.length > 0 && mediaItems[selectedIndex]) {
-      const item = mediaItems[selectedIndex];
-      syncManager.saveState({
-        currentItem: item,
-        selectedIndex,
-        activeCategory,
-        searchQuery,
-      });
-      syncManager.broadcast({
-        type: 'SELECT_ITEM',
-        item,
-        category: activeCategory,
-        index: selectedIndex,
-      });
-
-      if (pairingCode) {
-        updateRemoteSession(pairingCode, {
-          currentItem: item,
-          selectedIndex,
-          activeCategory,
-          searchQuery,
-        });
-      }
-    }
-  }, [selectedIndex, mediaItems, activeCategory, searchQuery, pairingCode]);
-
-  // 2. Synchronize playing media and player config with Live Display Screen (BroadcastChannel + Firebase)
-  useEffect(() => {
-    if (playingMedia) {
-      syncManager.saveState({ 
-        playingItem: playingMedia,
-        serverIndex: playerServerIndex,
-        season: playerSeason,
-        episode: playerEpisode,
-      });
-      syncManager.broadcast({ 
-        type: 'PLAY', 
-        item: playingMedia,
-        serverIndex: playerServerIndex,
-        season: playerSeason,
-        episode: playerEpisode,
-      });
-
-      if (pairingCode) {
-        const now = Date.now();
-        updateRemoteSession(pairingCode, {
-          playingItem: playingMedia,
-          serverIndex: playerServerIndex,
-          season: playerSeason,
-          episode: playerEpisode,
-          playerCommand: { command: 'play', timestamp: now },
-        });
-      }
-    } else {
-      syncManager.saveState({ playingItem: null });
-      syncManager.broadcast({ type: 'CLOSE_PLAYER' });
-
-      if (pairingCode) {
-        const now = Date.now();
-        updateRemoteSession(pairingCode, {
-          playingItem: null,
-          playerCommand: { command: 'stop', timestamp: now },
-        });
-      }
-    }
-  }, [playingMedia, playerServerIndex, playerSeason, playerEpisode, pairingCode]);
-
-  // 3. Respond to state requests from newly opened Display Screen tabs
-  useEffect(() => {
-    const unsubscribe = syncManager.subscribe((msg) => {
-      if (msg.type === 'REQUEST_STATE') {
-        const item = mediaItems[selectedIndex] || null;
-        syncManager.saveState({
-          currentItem: item,
-          playingItem: playingMedia,
-          serverIndex: playerServerIndex,
-          season: playerSeason,
-          episode: playerEpisode,
-          activeCategory,
-          searchQuery,
-          selectedIndex,
-        });
-      } else if (msg.type === 'PLAYER_COMMAND') {
-        if (pairingCode) {
-          updateRemoteSession(pairingCode, {
-            playerCommand: {
-              command: msg.command,
-              value: msg.value,
-              timestamp: msg.timestamp,
-            },
-          });
-        }
-      }
-    });
-    return () => unsubscribe();
-  }, [mediaItems, selectedIndex, playingMedia, playerServerIndex, playerSeason, playerEpisode, activeCategory, searchQuery]);
-  
   // Category item count cache
   const [counts, setCounts] = useState<Record<CategoryType, number>>({
     movies: 20,
@@ -374,8 +465,10 @@ export default function App() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const isFetchingRef = useRef(false);
 
+  const hasMountedRef = useRef(false);
+
   // Fetch initial media (Page 1) when Category or Search Query Changes
-  const fetchInitialMedia = useCallback(async (cat: CategoryType, query: string) => {
+  const fetchInitialMedia = useCallback(async (cat: CategoryType, query: string, shouldAutoPlay = true) => {
     setIsLoading(true);
     setPage(1);
     isFetchingRef.current = true;
@@ -392,6 +485,11 @@ export default function App() {
           [cat]: result.items.length,
         }));
       }
+
+      // Auto-play selected item of this category on TV if requested
+      if (shouldAutoPlay && result.items.length > 0) {
+        handlePlayMediaRef.current(result.items[0], 1, 1);
+      }
     } catch (err) {
       console.error('[API Fetch Error]:', err);
     } finally {
@@ -400,647 +498,304 @@ export default function App() {
     }
   }, []);
 
-  // Infinite Scroll: Fetch next page when user scrolls near the bottom
-  const loadNextPage = useCallback(async () => {
-    if (isFetchingRef.current || !hasMore || isLoading || isLoadingMore) return;
-
-    isFetchingRef.current = true;
+  // Fetch more media (Infinite Scrolling)
+  const fetchMoreMedia = useCallback(async () => {
+    if (isLoadingMore || !hasMore || isFetchingRef.current) return;
     setIsLoadingMore(true);
+    isFetchingRef.current = true;
     const nextPage = page + 1;
-
     try {
       const result = await loadCategoryMedia(activeCategory, searchQuery, nextPage);
-      
-      setMediaItems((prev) => {
-        const existingIds = new Set(prev.map((i) => i.id));
-        const newItems = result.items.filter((i) => !existingIds.has(i.id));
-        return [...prev, ...newItems];
-      });
-
-      setPage(nextPage);
-      setHasMore(result.hasMore);
+      if (result.items.length === 0) {
+        setHasMore(false);
+      } else {
+        setMediaItems((prev) => [...prev, ...result.items]);
+        setPage(nextPage);
+        setHasMore(result.hasMore);
+      }
     } catch (err) {
-      console.error('[Infinite Scroll Error]:', err);
+      console.error('[API Pagination Error]:', err);
     } finally {
       setIsLoadingMore(false);
       isFetchingRef.current = false;
     }
-  }, [activeCategory, searchQuery, page, hasMore, isLoading, isLoadingMore]);
+  }, [activeCategory, searchQuery, page, hasMore, isLoadingMore]);
 
-  // IntersectionObserver callback for infinite scrolling anchor
-  const loadMoreAnchorRef = useCallback((node: HTMLElement | null) => {
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-    }
-    if (!node) return;
-
-    observerRef.current = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) {
-        loadNextPage();
-      }
-    }, {
-      rootMargin: '500px', // Fetch well before hitting the exact bottom
-      threshold: 0.1,
-    });
-
-    observerRef.current.observe(node);
-  }, [loadNextPage]);
-
-  // Debounced initial fetch trigger on category or search changes
+  // Load initial content on mount & handle category/search changes
   useEffect(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
 
-    const delay = searchQuery ? 350 : 0;
-    debounceTimerRef.current = setTimeout(() => {
-      fetchInitialMedia(activeCategory, searchQuery);
-    }, delay);
+    if (searchQuery) {
+      debounceTimerRef.current = setTimeout(() => {
+        fetchInitialMedia(activeCategory, searchQuery, false);
+      }, 350);
+    } else {
+      autoPlayCategoryChangeRef.current = false;
+      fetchInitialMedia(activeCategory, '', true);
+    }
 
     return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
   }, [activeCategory, searchQuery, fetchInitialMedia]);
 
-  // Watch window scroll for "Scroll to Top" button
-  useEffect(() => {
-    const handleScroll = () => {
-      if (window.scrollY > 280) {
-        setShowScrollTop(true);
-      } else {
-        setShowScrollTop(false);
-      }
-    };
+  // IntersectionObserver for seamless infinite scrolling
+  const loadMoreAnchorRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (isLoading || isLoadingMore) return;
+      if (observerRef.current) observerRef.current.disconnect();
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  const scrollToTop = () => {
-    soundFx.playClick('nav');
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth',
-    });
-  };
-
-  // Toggle bookmark in local state and localStorage
-  const toggleBookmark = (id: string) => {
-    setBookmarks((prev) => {
-      const updated = prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id];
-      try {
-        localStorage.setItem('cinematic_remote_bookmarks', JSON.stringify(updated));
-      } catch {
-        // Storage unavailable
-      }
-      return updated;
-    });
-  };
-
-  // Toggle remote audio clicks
-  const toggleSound = () => {
-    const next = !soundEnabled;
-    setSoundEnabled(next);
-    soundFx.enabled = next;
-    if (next) soundFx.playClick('switch');
-  };
-
-  // Remote button press handler (Up/Down skips row, Prev/Next moves single item, Close exits player, Toggle Hide)
-  const handleRemotePress = useCallback((action: 'up' | 'down' | 'prev' | 'next' | 'ok' | 'close' | 'toggle_hide') => {
-    if (isScreenLocked) {
-      return;
-    }
-
-    setLastRemoteAction(action);
-    setTimeout(() => setLastRemoteAction(null), 250);
-
-    if (action === 'toggle_hide') {
-      if (playingMedia) {
-        setIsPlayerHidden((prev) => !prev);
-      }
-      return;
-    }
-
-    if (action === 'close') {
-      setPlayingMedia(null);
-      setIsPlayerHidden(false);
-      setIsScreenLocked(false);
-      setActiveModalItem(null);
-      return;
-    }
-
-    // When player is active on screen, OK acts as simulated mouse click, Prev as Rewind/Prev Ep, Next as Forward/Next Ep
-    if (playingMedia && !isPlayerHidden) {
-      if (action === 'ok') {
-        const actionData = { action: 'play' as const, timestamp: Date.now() };
-        setPlayerRemoteAction(actionData);
-        syncManager.broadcast({ type: 'PLAYER_ACTION', action: 'play', timestamp: actionData.timestamp });
-        if (pairingCode) {
-          updateRemoteSession(pairingCode, { playerAction: actionData });
+      observerRef.current = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && hasMore) {
+          fetchMoreMedia();
         }
-        return;
-      }
-      if (action === 'prev') {
-        const actionData = { action: 'preview' as const, timestamp: Date.now() };
-        setPlayerRemoteAction(actionData);
-        syncManager.broadcast({ type: 'PLAYER_ACTION', action: 'preview', timestamp: actionData.timestamp });
-        if (pairingCode) {
-          updateRemoteSession(pairingCode, { playerAction: actionData });
-        }
-        return;
-      }
-      if (action === 'next') {
-        const actionData = { action: 'next' as const, timestamp: Date.now() };
-        setPlayerRemoteAction(actionData);
-        syncManager.broadcast({ type: 'PLAYER_ACTION', action: 'next', timestamp: actionData.timestamp });
-        if (pairingCode) {
-          updateRemoteSession(pairingCode, { playerAction: actionData });
-        }
-        return;
-      }
-    }
-
-    if (mediaItems.length === 0) return;
-
-    const cols = window.innerWidth >= 1024 ? 5 : window.innerWidth >= 768 ? 4 : window.innerWidth >= 640 ? 3 : 2;
-
-    if (action === 'up') {
-      setSelectedIndex((prev) => {
-        const next = prev >= cols ? prev - cols : Math.max(0, prev - 1);
-        return next;
       });
-    } else if (action === 'down') {
-      setSelectedIndex((prev) => {
-        const next = prev + cols;
-        if (next >= mediaItems.length - 5 && hasMore) {
-          loadNextPage();
-        }
-        const target = next < mediaItems.length ? next : Math.min(mediaItems.length - 1, prev + 1);
-        return target;
-      });
-    } else if (action === 'prev') {
-      setSelectedIndex((prev) => {
-        const next = Math.max(0, prev - 1);
-        return next;
-      });
-    } else if (action === 'next') {
-      setSelectedIndex((prev) => {
-        const next = prev + 1;
-        if (next >= mediaItems.length - 3 && hasMore) {
-          loadNextPage();
-        }
-        const target = Math.min(mediaItems.length - 1, next);
-        return target;
-      });
-    } else if (action === 'ok') {
-      const item = mediaItems[selectedIndex];
-      if (item) {
-        handlePlayMedia(item, 1, 1);
-      }
-    }
-  }, [mediaItems, selectedIndex, hasMore, loadNextPage, playingMedia, isScreenLocked, handlePlayMedia]);
 
-  // Physical Keyboard Navigation for TV/Remote feel
+      if (node) observerRef.current.observe(node);
+    },
+    [isLoading, isLoadingMore, hasMore, fetchMoreMedia]
+  );
+
+  // Keyboard navigation for TV remote feel (D-Pad & Shortcuts)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // If screen is locked, block all keys except 'L' to toggle unlock
-      if (isScreenLocked) {
-        if (e.key === 'l' || e.key === 'L') {
-          e.preventDefault();
-          setIsScreenLocked(false);
-          soundFx.playClick('ok');
-        } else {
-          e.preventDefault();
-        }
-        return;
-      }
+      // Disable key navigation if screen locked or inside text input
+      if (isScreenLocked) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        if (e.key === 'Escape') {
-          target.blur();
-        }
-        return;
-      }
-
-      if (e.key === 'l' || e.key === 'L') {
-        if (playingMedia) {
-          e.preventDefault();
-          setIsScreenLocked(true);
-          soundFx.playClick('switch');
-          return;
-        }
-      }
-
-      if (e.key === 'Escape') {
-        if (playingMedia) {
-          e.preventDefault();
-          setPlayingMedia(null);
-          setIsPlayerHidden(false);
-          setIsScreenLocked(false);
-          return;
-        }
-        if (activeModalItem) {
-          e.preventDefault();
-          setActiveModalItem(null);
-          return;
-        }
-      }
-
-      if (e.key === 'h' || e.key === 'H') {
-        if (playingMedia) {
-          e.preventDefault();
-          setIsPlayerHidden((prev) => !prev);
-          soundFx.playClick('switch');
-          return;
-        }
-      }
-
-      // If media is open/playing, block all navigation keys (arrows, enter, numbers) so movie never changes
-      if (playingMedia) {
-        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', '1', '2', '3'].includes(e.key)) {
-          e.preventDefault();
-          return;
-        }
-      }
-
-      if (e.key === 'ArrowUp') {
+      if (e.key === 'ArrowRight') {
         e.preventDefault();
-        handleRemotePress('up');
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        handleRemotePress('down');
+        const next = Math.min(selectedIndex + 1, mediaItems.length - 1);
+        setSelectedIndex(next);
+        soundFx.playClick('switch');
+        if (mediaItems[next]) {
+          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        }
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        handleRemotePress('prev');
-      } else if (e.key === 'ArrowRight') {
+        const next = Math.max(selectedIndex - 1, 0);
+        setSelectedIndex(next);
+        soundFx.playClick('switch');
+        if (mediaItems[next]) {
+          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        }
+      } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        handleRemotePress('next');
-      } else if (e.key === 'Enter' || e.key === ' ') {
+        const next = Math.min(selectedIndex + 4, mediaItems.length - 1);
+        setSelectedIndex(next);
+        soundFx.playClick('switch');
+        if (mediaItems[next]) {
+          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        }
+      } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        handleRemotePress('ok');
-      } else if (e.key === '1') {
-        setActiveCategory('movies');
-        setPlayingMedia(null);
-        setIsPlayerHidden(false);
+        const next = Math.max(selectedIndex - 4, 0);
+        setSelectedIndex(next);
         soundFx.playClick('switch');
-      } else if (e.key === '2') {
-        setActiveCategory('tv');
-        setPlayingMedia(null);
-        setIsPlayerHidden(false);
-        soundFx.playClick('switch');
-      } else if (e.key === '3') {
-        setActiveCategory('anime');
-        setPlayingMedia(null);
-        setIsPlayerHidden(false);
-        soundFx.playClick('switch');
+        if (mediaItems[next]) {
+          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (mediaItems[selectedIndex]) {
+          soundFx.playClick('ok');
+          handlePlayMediaRef.current(mediaItems[selectedIndex], 1, 1);
+        }
+      } else if (e.key === 'Escape') {
+        if (activeModalItem) {
+          setActiveModalItem(null);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRemotePress, playingMedia, activeModalItem]);
+  }, [mediaItems, selectedIndex, activeModalItem, isScreenLocked]);
 
-  const currentItem = mediaItems[selectedIndex];
-
-  const handleDisconnectRemote = async () => {
-    soundFx.playClick('switch');
-    if (pairingCode) {
-      if (pairingCode === QUICK_CONNECT_CODE) {
-        await disconnectQuickNetworkRemote();
+  // Scroll listener for back to top button
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 400) {
+        setShowScrollTop(true);
       } else {
-        await disconnectRemoteSession(pairingCode);
+        setShowScrollTop(false);
       }
-      setPairingCode('');
-      syncManager.broadcast({ type: 'DISCONNECT', timestamp: Date.now() });
-      syncManager.saveState({ playingItem: null });
-      setPlayingMedia(null);
-    }
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const handleScrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    soundFx.playClick('switch');
   };
 
-  // If opened in dedicated Live Display Screen mode, render the Live Display
+  const handleToggleBookmark = (id: string) => {
+    soundFx.playClick('switch');
+    setBookmarks((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      try {
+        localStorage.setItem('cinematic_remote_bookmarks', JSON.stringify(next));
+      } catch (_) {}
+      return next;
+    });
+  };
+
+  // If URL indicates dedicated TV Display view, render LiveDisplayScreen
   if (isDisplayView) {
     return <LiveDisplayScreen />;
   }
 
   return (
-    <div className="min-h-screen w-full bg-[#08090d] text-zinc-100 font-sans antialiased selection:bg-amber-500 selection:text-black">
-      {/* Ambient background glow */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[800px] h-[350px] bg-amber-500/10 blur-[140px] rounded-full" />
-        <div className="absolute top-1/2 -left-32 w-[500px] h-[500px] bg-orange-600/5 blur-[150px] rounded-full" />
-        <div className="absolute bottom-0 right-0 w-[600px] h-[500px] bg-red-900/5 blur-[160px] rounded-full" />
-      </div>
-
-      {/* Full Page Content Container: No extra side space on wide screens, edge-to-edge balanced */}
-      <div className="relative z-10 w-full max-w-[1500px] mx-auto px-2 sm:px-4 md:px-6 py-3 sm:py-5 flex flex-col gap-4">
-        
-        {/* Remote Controller Deck Header Container */}
-        <header id="main-remote-deck" className="flex flex-col gap-2.5 sm:gap-3 p-2.5 sm:p-4 bg-zinc-950/90 backdrop-blur-xl rounded-2xl sm:rounded-3xl border border-zinc-800/90 shadow-2xl shadow-black">
-          
-          {/* Deck Status Bar (Top mini row) */}
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="flex items-center gap-2">
-                <div className="p-1 sm:p-1.5 rounded-lg sm:rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                  <Tv2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[11px] sm:text-xs font-black tracking-wider uppercase text-white font-mono flex items-center gap-1.5">
-                    CINEMA REMOTE
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  </span>
-                  <span className="text-[9px] sm:text-[10px] text-zinc-500 flex items-center gap-1">
-                    <Radio className="w-2.5 h-2.5 text-amber-500/80" />
-                    Live: TMDB v3 API
-                  </span>
-                </div>
-              </div>
-
-              {/* TV Pairing Code Button */}
-              <button
-                id="top-tv-pairing-code-btn"
-                type="button"
-                onClick={() => {
-                  soundFx.playClick('switch');
-                  setIsPairingModalOpen(true);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-amber-400 hover:text-amber-300 border border-amber-500/40 font-mono font-bold text-xs sm:text-sm tracking-wider cursor-pointer shadow-md transition-all hover:scale-105 active:scale-95"
-                title="View TV Pairing Code (Quick Connect: gotocinema / Cloud 6-digit Code)"
-              >
-                <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-                {pairingCode ? (
-                  <span className="flex items-center gap-1">
-                    <span className="hidden sm:inline text-zinc-400 font-sans text-xs">
-                      {pairingCode === QUICK_CONNECT_CODE ? 'Quick:' : 'Code:'}
-                    </span>
-                    <span className="text-white font-black tracking-widest">{pairingCode}</span>
-                  </span>
-                ) : (
-                  <span>Pair TV</span>
-                )}
-              </button>
-
-              {/* Top Remote Display Button: Opens Live Display Screen in New Tab */}
-              <a
-                id="top-remote-display-btn"
-                href={pairingCode ? `?view=display&code=${pairingCode}` : '?view=display'}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => soundFx.playClick('switch')}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-orange-500 hover:brightness-110 text-black font-black text-xs sm:text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(245,158,11,0.5)] hover:scale-105 active:scale-95 transition-all cursor-pointer border border-amber-300/60"
-                title="Open Live Display Screen in New Tab (Controlled live by this remote)"
-              >
-                <Tv2 className="w-4 h-4 stroke-[2.5]" />
-                <span>Remote Display</span>
-                <ExternalLink className="w-3.5 h-3.5 stroke-[2.5]" />
-              </a>
-            </div>
-
-            {/* Utility Toggles: Audio click, reset, bookmarks */}
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              {bookmarks.length > 0 && (
-                <div 
-                  className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] sm:text-xs font-semibold"
-                  title="Saved in Watchlist"
-                >
-                  <Bookmark className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400" />
-                  <span>{bookmarks.length}</span>
-                </div>
-              )}
-
-              {/* QR Code Scanner Camera Button (Directly to the Left of Profile) */}
-              <button
-                id="camera-qr-scanner-btn"
-                type="button"
-                disabled={isScreenLocked}
-                onClick={() => {
-                  if (isScreenLocked) return;
-                  soundFx.playClick('switch');
-                  setIsQRScannerOpen(true);
-                }}
-                className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl border transition-all flex items-center justify-center ${
-                  isScreenLocked 
-                    ? 'opacity-30 cursor-not-allowed bg-zinc-900 text-zinc-600 border-zinc-800 pointer-events-none'
-                    : 'bg-zinc-900 hover:bg-zinc-800 text-amber-400 hover:text-amber-300 border-zinc-800 hover:border-amber-500/40 cursor-pointer shadow-sm'
-                }`}
-                title="Scan QR Code (Camera & Image Upload)"
-              >
-                <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-              </button>
-
-              {/* Login / Register User Button (Replaces Reset selection) */}
-              <button
-                id="user-auth-btn"
-                type="button"
-                disabled={isScreenLocked}
-                onClick={() => {
-                  if (isScreenLocked) return;
-                  soundFx.playClick('switch');
-                  setIsAuthModalOpen(true);
-                }}
-                className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl border transition-all flex items-center justify-center ${
-                  isScreenLocked 
-                    ? 'opacity-30 cursor-not-allowed bg-zinc-900 text-zinc-600 border-zinc-800 pointer-events-none'
-                    : currentUser 
-                      ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40 cursor-pointer shadow-md'
-                      : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border-zinc-800 cursor-pointer'
-                }`}
-                title={currentUser ? `Profile: ${currentUser.displayName || currentUser.email}` : "Login / Register (Account)"}
-              >
-                {currentUser?.photoURL ? (
-                  <img 
-                    src={currentUser.photoURL} 
-                    alt="Profile" 
-                    className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full object-cover" 
-                  />
-                ) : (
-                  <UserIcon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${currentUser ? 'text-amber-400' : 'text-zinc-400'}`} />
-                )}
-              </button>
-
-              <button
-                id="toggle-sound-btn"
-                type="button"
-                disabled={isScreenLocked}
-                onClick={toggleSound}
-                className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl border transition-colors ${
-                  isScreenLocked 
-                    ? 'opacity-30 cursor-not-allowed bg-zinc-900 text-zinc-600 border-zinc-800 pointer-events-none'
-                    : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border-zinc-800 cursor-pointer'
-                }`}
-                title={soundEnabled ? 'Mute remote click sound' : 'Enable remote sound feedback'}
-              >
-                {soundEnabled ? (
-                  <Volume2 className="w-3.5 h-3.5 text-amber-400" />
-                ) : (
-                  <VolumeX className="w-3.5 h-3.5 text-zinc-600" />
-                )}
-              </button>
+    <div 
+      id="app-root" 
+      className="min-h-screen bg-[#08080c] text-zinc-100 flex flex-col font-sans selection:bg-amber-500 selection:text-black"
+    >
+      {/* 1. TOP STATUS & NAVIGATION BAR */}
+      <header className="sticky top-0 z-40 bg-[#0c0d12]/90 backdrop-blur-md border-b border-zinc-800/80 px-3 py-2.5 sm:px-6">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
+          {/* Status Logo Indicator (Name removed per user request) */}
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="p-1.5 sm:p-2 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 text-black shadow-lg shadow-amber-500/20">
+              <Radio className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
             </div>
           </div>
 
-          {/* Direct TV Display Connect Bar on Main Remote Page */}
-          <div 
-            id="main-page-tv-connect-bar" 
-            className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 px-3 py-2 sm:py-2.5 bg-zinc-900/90 border border-amber-500/30 rounded-xl sm:rounded-2xl shadow-inner"
-          >
-            {pairingCode ? (
-              <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                  </span>
-                  <span className="text-xs font-medium text-zinc-300">Connected to TV Display:</span>
-                  <span className="font-mono font-black text-amber-400 text-sm tracking-wider px-2 py-0.5 bg-black/60 rounded-md border border-amber-500/30">
-                    {pairingCode}
-                  </span>
-                  <span className="hidden md:inline text-[11px] text-emerald-400 font-medium">
-                    (Active Remote Control)
-                  </span>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <a
-                    id="main-bar-open-display-btn"
-                    href={`?view=display&code=${pairingCode}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => soundFx.playClick('switch')}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-amber-300 text-xs font-semibold border border-amber-500/30 transition-all cursor-pointer"
-                    title="Open or focus TV display"
-                  >
-                    <Tv2 className="w-3.5 h-3.5" />
-                    <span>Display View</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-
-                  <button
-                    id="main-bar-disconnect-tv-btn"
-                    type="button"
-                    onClick={handleMainPageDisconnect}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/50 text-xs font-bold transition-all cursor-pointer"
-                  >
-                    <Unplug className="w-3 h-3 text-red-400" />
-                    <span>Disconnect</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                    <Tv2 className="w-4 h-4" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
-                      TV CONNECT
-                      <span className="text-[10px] text-amber-400/90 font-sans font-normal lowercase">(alphabet & numbers)</span>
-                    </span>
-                    <span className="text-[10px] text-zinc-400">
-                      Code shown on TV (e.g. <button type="button" onClick={() => { soundFx.playClick('switch'); setMainPageCodeInput(QUICK_CONNECT_CODE); }} className="text-amber-400 underline font-mono font-bold hover:text-amber-300 cursor-pointer">{QUICK_CONNECT_CODE}</button>)
-                    </span>
-                  </div>
-                </div>
-
-                <form onSubmit={handleMainPageConnect} className="flex items-center gap-2">
-                  <input
-                    id="main-page-tv-code-input"
-                    type="text"
-                    value={mainPageCodeInput}
-                    onChange={(e) => setMainPageCodeInput(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
-                    placeholder="gotocinema"
-                    className="w-32 sm:w-44 text-center font-mono text-sm sm:text-base font-black py-1.5 px-2.5 bg-black/80 border border-amber-500/40 rounded-xl text-amber-400 placeholder:text-zinc-600 focus:outline-none focus:border-amber-400 tracking-wider shadow-inner"
-                  />
-                  <button
-                    id="main-page-tv-connect-btn"
-                    type="submit"
-                    disabled={isConnectingMainPage || !mainPageCodeInput.trim()}
-                    className="py-1.5 px-3.5 sm:px-4 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-orange-500 hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed text-black font-black text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-95 whitespace-nowrap"
-                  >
-                    {isConnectingMainPage ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <>
-                        <span>Connect TV</span>
-                        <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                      </>
+          {/* Header Controls: Room Code Input + Active Button + Camera QR + TV Player + Sound */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Room code input box & active button directly before camera icon */}
+            <form onSubmit={handleMainPageConnect} className="flex items-center gap-1 sm:gap-1.5">
+              <input
+                id="header-room-code-input"
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={mainPageCodeInput}
+                onChange={(e) => setMainPageCodeInput(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder="Code"
+                className={`w-14 sm:w-18 text-center font-mono text-xs font-bold py-1.5 px-1 sm:px-2 bg-zinc-900 border rounded-xl placeholder:text-zinc-600 focus:outline-none transition-all ${
+                  pairingCode && pairingCode === mainPageCodeInput
+                    ? 'border-emerald-500/60 ring-1 ring-emerald-500/30 text-emerald-400'
+                    : 'border-zinc-800 focus:border-amber-500/60 text-amber-400'
+                }`}
+                title="Enter 4-digit TV room code"
+              />
+              <button
+                id="header-room-active-btn"
+                type="submit"
+                disabled={isConnectingMainPage || mainPageCodeInput.trim().length !== 4}
+                className={`px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm ${
+                  pairingCode && pairingCode === mainPageCodeInput
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-black'
+                    : 'bg-amber-500 hover:bg-amber-400 text-black disabled:opacity-40 disabled:cursor-not-allowed'
+                }`}
+                title={pairingCode && pairingCode === mainPageCodeInput ? 'Room is Active' : 'Activate TV Room'}
+              >
+                {isConnectingMainPage ? (
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                ) : (
+                  <>
+                    {pairingCode && pairingCode === mainPageCodeInput && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-black animate-pulse" />
                     )}
-                  </button>
-                </form>
-              </div>
-            )}
-          </div>
-          
-          {/* Main Page Connect Feedback Notification */}
-          {mainPageConnectFeedback && (
-            <div className={`px-3 py-1.5 rounded-xl text-xs text-center font-medium ${
-              mainPageConnectFeedback.success 
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
-                : 'bg-red-500/10 text-red-400 border border-red-500/30'
-            }`}>
-              {mainPageConnectFeedback.msg}
-            </div>
-          )}
+                    <span>Active</span>
+                  </>
+                )}
+              </button>
+            </form>
 
-          {/* 1. TOP: Movie, TV Show, Anime 3 Buttons strictly in ONE Line */}
-          <div className={isScreenLocked ? 'opacity-40 pointer-events-none' : ''}>
-            <RemoteTopNav
-              activeCategory={activeCategory}
-              onSelectCategory={(cat) => {
-                if (isScreenLocked) return;
-                setActiveCategory(cat);
-                setSearchQuery('');
-                setPlayingMedia(null);
-                setPlayerSeason(1);
-                setPlayerEpisode(1);
+            {/* Scan QR Code Button (Camera icon) */}
+            <button
+              id="header-scan-qr-btn"
+              type="button"
+              onClick={() => {
+                soundFx.playClick('switch');
+                setIsQRScannerOpen(true);
               }}
-              counts={counts}
-            />
+              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+              title="Scan TV Screen QR Code with Camera"
+            >
+              <Camera className="w-4 h-4" />
+              <span className="hidden md:inline">Scan QR</span>
+            </button>
+
+            {/* Open TV Display View in New Tab */}
+            <a
+              id="header-tv-player-btn"
+              href="/tv"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+              title="Open TV Screen (/tv) in a new tab"
+            >
+              <Tv2 className="w-4 h-4 text-amber-400" />
+              <span className="hidden md:inline">TV Screen</span>
+              <ExternalLink className="w-3 h-3 text-amber-400/80" />
+            </a>
           </div>
+        </div>
 
-          {/* 2. NICHE: Long Searchbar with Voice Control Icon */}
-          <div className={isScreenLocked ? 'opacity-30 pointer-events-none' : ''}>
-            <RemoteSearchBar
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              activeCategory={activeCategory}
-            />
+        {/* Connection Feedback Banner */}
+        {mainPageConnectFeedback && (
+          <div 
+            className={`mt-2 max-w-7xl mx-auto p-2 rounded-xl text-xs flex items-center justify-between gap-2 animate-fadeIn ${
+              mainPageConnectFeedback.success
+                ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300'
+                : 'bg-red-950/40 border border-red-500/40 text-red-300'
+            }`}
+          >
+            <span>{mainPageConnectFeedback.msg}</span>
+            <button 
+              type="button" 
+              onClick={() => setMainPageConnectFeedback(null)}
+              className="text-zinc-400 hover:text-white p-0.5 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
+        )}
+      </header>
 
-          {/* 3. SUBHEADER: Category Title + Item Count */}
-          <div className={`flex items-center justify-between gap-2.5 sm:gap-4 pt-1.5 border-t border-zinc-800/80 ${isScreenLocked ? 'opacity-30 pointer-events-none' : ''}`}>
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                <h2 className="text-xs sm:text-sm md:text-base font-bold uppercase tracking-wider text-zinc-200">
-                  {activeCategory === 'movies' ? 'Movie Collection' : activeCategory === 'tv' ? 'TV Show Series' : 'Anime Chronology'}
-                </h2>
-              </div>
-            </div>
+      {/* 3. MAIN CONTENT CONTAINER */}
+      <div className={`max-w-7xl mx-auto w-full px-4 sm:px-6 py-4 flex-1 flex flex-col gap-4 transition-all ${
+        pairingCode || playingMedia ? 'pb-16 sm:pb-20' : 'pb-12'
+      }`}>
+        {/* Category Navigation (Movies, TV Shows, Anime) in 1 clean line */}
+        <RemoteTopNav
+          activeCategory={activeCategory}
+          counts={counts}
+          disabled={isScreenLocked}
+          onSelectCategory={(cat) => {
+            if (isScreenLocked) return;
+            soundFx.playClick('switch');
+            autoPlayCategoryChangeRef.current = true;
+            if (cat === activeCategory) {
+              fetchInitialMedia(cat, '', true);
+            } else {
+              setActiveCategory(cat);
+              setSearchQuery('');
+            }
+          }}
+        />
 
-            {/* Right: Items counter */}
-            <div className="flex items-center gap-2 shrink-0">
-              {isLoading ? (
-                <span className="text-[11px] sm:text-xs font-mono text-amber-400 bg-zinc-900/90 border border-zinc-800 px-2 sm:px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
-                  <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                  <span className="hidden sm:inline">Loading...</span>
-                </span>
-              ) : (
-                <span className="text-[11px] sm:text-xs font-mono text-zinc-400 bg-zinc-900/90 border border-zinc-800 px-2 sm:px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
-                  <Layers className="w-3 h-3 text-zinc-500" />
-                  <span>{mediaItems.length} <span className="hidden sm:inline">titles</span></span>
-                </span>
-              )}
-            </div>
-          </div>
-        </header>
+        {/* Search Bar with voice search */}
+        <RemoteSearchBar
+          searchQuery={searchQuery}
+          onSearchChange={(query) => {
+            if (isScreenLocked) return;
+            setSearchQuery(query);
+          }}
+          onClearSearch={() => {
+            if (isScreenLocked) return;
+            setSearchQuery('');
+          }}
+          disabled={isScreenLocked}
+        />
 
-        {/* 4. Chronological Content Grid (Clean Main Page; Single controller appears at bottom ONLY when a movie is playing) */}
-        <main id="main-timeline-content" className={`w-full mt-1 ${playingMedia ? 'pb-36' : 'pb-16'}`}>
+        {/* Media Posters Catalog in Chronological Timeline */}
+        <main className="flex-1">
           <TimelineView
             category={activeCategory}
             items={mediaItems}
@@ -1048,93 +803,79 @@ export default function App() {
             isLoading={isLoading}
             isLoadingMore={isLoadingMore}
             hasMore={hasMore}
+            disabled={isScreenLocked}
             onSelectItem={(idx) => {
               if (isScreenLocked) return;
               setSelectedIndex(idx);
+              const target = mediaItems[idx];
+              if (target) {
+                handlePlayMedia(target, 1, 1);
+              }
             }}
             onOpenDetails={(item) => {
               if (isScreenLocked) return;
-              setActiveModalItem(item);
+              handlePlayMedia(item, 1, 1);
             }}
             onPlayItem={(item) => {
+              if (isScreenLocked) return;
               handlePlayMedia(item, 1, 1);
             }}
             loadMoreRef={loadMoreAnchorRef}
           />
         </main>
-
-        {/* 5. FLOATING MASTER CONTROL DECK: Real-time Firebase & Broadcast sync to Remote Screen */}
-        {playingMedia && (
-          <MainPageControlBar
-            playingMedia={playingMedia}
-            pairingCode={pairingCode}
-            userEmail={currentUser?.email || undefined}
-            serverIndex={playerServerIndex}
-            season={playerSeason}
-            episode={playerEpisode}
-            onServerChange={(idx) => setPlayerServerIndex(idx)}
-            onSeasonChange={(s) => setPlayerSeason(s)}
-            onEpisodeChange={(e) => setPlayerEpisode(e)}
-            onStop={() => {
-              soundFx.playClick('switch');
-              setPlayingMedia(null);
-            }}
-            onDisconnectRemote={handleDisconnectRemote}
-          />
-        )}
-
       </div>
 
-      {/* Fixed Bottom-Left Poster Selector Controller (Matching Top Bar Deck Style) */}
+      {/* 4. POSTER SELECTOR D-PAD CONTROLLER */}
       <PosterSelectorDpad
         items={mediaItems}
         selectedIndex={selectedIndex}
         category={activeCategory}
+        hasBottomBar={Boolean(pairingCode || playingMedia)}
+        disabled={isScreenLocked}
         onSelectItem={(idx) => {
           if (isScreenLocked) return;
           setSelectedIndex(idx);
+          const target = mediaItems[idx];
+          if (target) {
+            handlePlayMedia(target, 1, 1);
+          }
         }}
         onPlayItem={(item) => {
-          handlePlayMedia(item, 1, 1);
-        }}
-        disabled={isScreenLocked}
-      />
-
-      {/* Floating Scroll to Top Button (Top icon to jump to top with 1 click) */}
-      <button
-        id="scroll-to-top-btn"
-        type="button"
-        onClick={scrollToTop}
-        className={`fixed bottom-6 right-6 z-50 p-3 sm:p-3.5 rounded-2xl bg-amber-500 text-black shadow-[0_0_25px_rgba(245,158,11,0.6)] hover:bg-amber-400 hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer flex items-center justify-center gap-1.5 font-bold text-xs ${
-          showScrollTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-10 pointer-events-none'
-        }`}
-        title="Scroll to top"
-        aria-label="Back to top"
-      >
-        <ArrowUp className="w-5 h-5 stroke-[2.5]" />
-        <span className="hidden sm:inline uppercase tracking-wider text-[10px]">Top</span>
-      </button>
-
-      {/* Cinematic Detail Modal when info or card is opened */}
-      <MediaDetailModal
-        item={activeModalItem}
-        onClose={() => setActiveModalItem(null)}
-        isBookmarked={activeModalItem ? bookmarks.includes(activeModalItem.id) : false}
-        onToggleBookmark={toggleBookmark}
-        onPlay={(item) => {
+          if (isScreenLocked) return;
           handlePlayMedia(item, 1, 1);
         }}
       />
 
-      {/* Firebase Authentication & User Profile Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentUser={currentUser}
-        pairingCode={pairingCode}
-        onOpenPairingModal={() => setIsPairingModalOpen(true)}
-        onDisconnectRemote={handleDisconnectRemote}
-      />
+      {/* 5. SLEEK BOTTOM PLAYER CONTROL BAR (Thin, simple, 1 line on bottom) */}
+      {(pairingCode || playingMedia) && (
+        <ConnectedRemotePanel
+          isPlaying={isRemotePlaying}
+          item={playingMedia || mediaItems[selectedIndex]}
+          season={playerSeason}
+          episode={playerEpisode}
+          category={activeCategory}
+          onTogglePlayPause={handleTogglePlayPause}
+          onRewind10={handleRewind10}
+          onForward10={handleForward10}
+          onSeekTime={handleSeekTime}
+          onPlaySeasonEpisode={handlePlaySeasonEpisode}
+          onCloseSession={handleCloseSession}
+        />
+      )}
+
+      {/* Media Detail Modal */}
+      {activeModalItem && (
+        <MediaDetailModal
+          item={activeModalItem}
+          isBookmarked={bookmarks.includes(activeModalItem.id)}
+          onToggleBookmark={() => handleToggleBookmark(activeModalItem.id)}
+          onClose={() => setActiveModalItem(null)}
+          onPlay={(season, episode) => {
+            handlePlayMedia(activeModalItem, season, episode);
+            setActiveModalItem(null);
+          }}
+        />
+      )}
 
       {/* Full-Screen Camera & Image QR Code Scanner Modal */}
       <QRScannerModal
@@ -1144,26 +885,24 @@ export default function App() {
           setSearchQuery(query);
           soundFx.playClick('switch');
         }}
+        onConnectRoom={(code) => {
+          handleConnectRoomCode(code);
+        }}
       />
 
-      {/* Device Pairing / TV Connect Code Modal (Firebase Sync with User Gmail) */}
-      <DevicePairingModal
-        isOpen={isPairingModalOpen}
-        onClose={() => setIsPairingModalOpen(false)}
-        pairingCode={pairingCode}
-        userEmail={currentUser?.email || ''}
-        onSetActiveCode={(code) => {
-          setPairingCode(code);
-        }}
-        onRegenerateCode={async () => {
-          if (currentUser) {
-            const newCode = await getOrCreateUserSession(currentUser);
-            setPairingCode(newCode);
-          }
-        }}
-        onOpenLoginModal={() => setIsAuthModalOpen(true)}
-        onDisconnectRemote={handleDisconnectRemote}
-      />
+      {/* Floating Scroll to Top Button */}
+      {showScrollTop && (
+        <button
+          type="button"
+          onClick={handleScrollToTop}
+          className={`fixed right-5 z-30 p-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black shadow-xl shadow-amber-500/20 active:scale-95 transition-all cursor-pointer ${
+            pairingCode || playingMedia ? 'bottom-22 sm:bottom-24' : 'bottom-6'
+          }`}
+          title="Scroll to Top"
+        >
+          <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+        </button>
+      )}
     </div>
   );
 }

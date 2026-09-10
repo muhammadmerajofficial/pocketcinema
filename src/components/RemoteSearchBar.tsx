@@ -6,6 +6,7 @@ interface RemoteSearchBarProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   activeCategory: string;
+  disabled?: boolean;
 }
 
 // Support browser SpeechRecognition types
@@ -18,6 +19,7 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
   searchQuery,
   onSearchChange,
   activeCategory,
+  disabled = false,
 }) => {
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -131,10 +133,11 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
         <input
           id="remote-main-search-input"
           type="text"
+          disabled={disabled}
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={getPlaceholderText()}
-          className="flex-1 py-3.5 px-2 bg-transparent text-zinc-100 text-sm md:text-base placeholder:text-zinc-500 focus:outline-none tracking-wide"
+          placeholder={disabled ? 'Playback in progress • Controls active' : getPlaceholderText()}
+          className="flex-1 py-3.5 px-2 bg-transparent text-zinc-100 text-sm md:text-base placeholder:text-zinc-500 focus:outline-none tracking-wide disabled:cursor-not-allowed"
         />
 
         {/* Clear query button */}
@@ -142,8 +145,9 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
           <button
             id="clear-search-btn"
             type="button"
+            disabled={disabled}
             onClick={clearSearch}
-            className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors mr-1 cursor-pointer"
+            className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors mr-1 cursor-pointer disabled:pointer-events-none"
             title="Clear search"
           >
             <X className="w-4 h-4" />
@@ -154,9 +158,12 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
         <button
           id="remote-voice-control-btn"
           type="button"
+          disabled={disabled}
           onClick={toggleVoiceSearch}
           aria-label={isListening ? 'Stop listening' : 'Start voice search'}
-          className={`relative mr-2 flex items-center justify-center p-2.5 rounded-xl transition-all duration-300 cursor-pointer select-none ${
+          className={`relative mr-2 flex items-center justify-center p-2.5 rounded-xl transition-all duration-300 select-none ${
+            disabled ? 'opacity-40 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+          } ${
             isListening
               ? 'bg-red-500 text-white shadow-lg shadow-red-500/50 scale-105 animate-pulse'
               : 'bg-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-700/80 border border-zinc-700/50'

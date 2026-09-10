@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TV Player - Cinematic Remote</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- QRCode.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Firebase App & Firestore SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+  <style>
+    body {
+      background-color: #000;
+      color: #fff;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    #player-container iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body class="w-screen h-screen flex flex-col justify-between relative select-none">
+
+  <!-- Fullscreen Player Container (object-fit: contain / cover) -->
+  <div id="player-container" class="absolute inset-0 w-full h-full bg-black z-10 flex items-center justify-center">
+    <div id="standby-bg" class="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black text-center p-6">
+      <div class="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4 text-3xl">
+        🎬
+      </div>
+      <h1 class="text-2xl sm:text-3xl font-black text-white tracking-wider mb-2">CINEMATIC TV PLAYER</h1>
+      <p class="text-zinc-400 text-sm max-w-md">Connect your mobile remote to start streaming movies, TV shows, or anime.</p>
+    </div>
+    <iframe id="video-iframe" class="hidden w-full h-full" allowfullscreen allow="autoplay; fullscreen; encrypted-media; picture-in-picture"></iframe>
+  </div>
+
+  <!-- Top Bar -->
+  <header class="relative z-30 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black/90 to-transparent">
+    <div class="flex items-center gap-3">
+      <div class="px-3 py-1 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-mono font-bold tracking-wider">
+        ROOM #<span id="header-room-code">----</span>
+      </div>
+      <span id="connection-badge" class="px-2.5 py-0.5 rounded-full text-xs font-mono bg-zinc-800 text-zinc-400">
+        Waiting for Remote...
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="fullscreen-btn" onclick="toggleFullscreen()" class="px-3 py-1.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white transition-all cursor-pointer">
+        📺 Fullscreen Mode
+      </button>
+    </div>
+  </header>
+
+  <!-- Modern Clean Overlay in Center of Screen (Hidden when status changes to 'connected') -->
+  <div id="qr-overlay" class="relative z-30 flex-1 flex items-center justify-center p-4">
+    <div class="max-w-md w-full rounded-3xl bg-zinc-950/95 border border-zinc-800/90 p-8 shadow-2xl backdrop-blur-xl text-center">
+      <div class="inline-flex p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 mb-4 text-2xl">
+        📱
+      </div>
+      <h2 class="text-xl font-extrabold text-white tracking-tight mb-1">
+        Connect Your Remote Control
+      </h2>
+      <p class="text-zinc-400 text-sm mb-6">
+        Scan QR code &amp; connect your remote
+      </p>
+
+      <!-- Prominent QR Code container -->
+      <div class="relative mx-auto w-64 h-64 p-3 rounded-2xl bg-white flex items-center justify-center shadow-2xl border border-zinc-200">
+        <div id="qrcode" class="w-full h-full flex items-center justify-center"></div>
+      </div>
+
+      <!-- Numeric Room Code display -->
+      <div class="mt-6 flex items-center justify-center gap-3">
+        <div class="px-5 py-2.5 rounded-2xl bg-zinc-900 border border-zinc-700/80 flex items-center gap-2.5 shadow-inner">
+          <span class="text-xs uppercase tracking-wider text-zinc-400 font-semibold">Room Code:</span>
+          <span id="numeric-room-code" class="text-2xl font-mono font-black tracking-widest text-amber-400">
+            ----
+          </span>
+        </div>
+      </div>
+
+      <div class="mt-5">
+        <a id="remote-link" href="#" target="_blank" class="text-xs text-amber-400/90 hover:text-amber-300 font-medium hover:underline">
+          Open Remote page in new window ↗
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Bar -->
+  <footer class="relative z-30 flex items-center justify-between px-6 py-3 bg-gradient-to-t from-black/90 to-transparent text-xs text-zinc-400">
+    <span class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+      Realtime Room Sync
+    </span>
+    <span id="footer-item-title" class="font-medium text-zinc-300"></span>
+  </footer>
+
+  <script>
+    // 1. Firebase Configuration
+    const firebaseConfig = {
+      projectId: "gen-lang-client-0893712868",
+      appId: "1:583358101087:web:f3967a19056fbcf5c30dea",
+      apiKey: "AIzaSyA43x9EPKBy8TORPnmYq4lYLjDFgcC4I-I",
+      authDomain: "gen-lang-client-0893712868.firebaseapp.com",
+      storageBucket: "gen-lang-client-0893712868.firebasestorage.app",
+      messagingSenderId: "583358101087"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // 2. Generate Random 4-digit Room Code
+    function generate4DigitRoomCode() {
+      return Math.floor(1000 + Math.random() * 9000).toString();
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomCode = urlParams.get('room') || urlParams.get('code') || generate4DigitRoomCode();
+
+    document.getElementById('header-room-code').textContent = roomCode;
+    document.getElementById('numeric-room-code').textContent = roomCode;
+
+    // 3. Render QR Code pointing to remote page with ?room={roomCode}
+    const remoteUrl = window.location.origin + '/?room=' + roomCode;
+    document.getElementById('remote-link').href = remoteUrl;
+
+    new QRCode(document.getElementById('qrcode'), {
+      text: remoteUrl,
+      width: 230,
+      height: 230,
+      colorDark: "#000000",
+      colorLight: "#ffffff",
+      correctLevel: QRCode.CorrectLevel.H
+    });
+
+    // 4. Initialize Firebase room document
+    const roomRef = db.collection('rooms').doc(roomCode);
+    roomRef.set({
+      roomCode: roomCode,
+      isPlaying: false,
+      currentTime: 0,
+      action: 'none',
+      volume: 1,
+      status: 'waiting',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // Cleanup on window unload
+    window.addEventListener('beforeunload', () => {
+      roomRef.update({ status: 'closed' }).catch(() => {});
+    });
+
+    // 5. Firebase Realtime Listener
+    let lastActionTimestamp = 0;
+    const qrOverlay = document.getElementById('qr-overlay');
+    const connectionBadge = document.getElementById('connection-badge');
+    const standbyBg = document.getElementById('standby-bg');
+    const videoIframe = document.getElementById('video-iframe');
+    const footerTitle = document.getElementById('footer-item-title');
+
+    roomRef.onSnapshot((doc) => {
+      if (!doc.exists) return;
+      const data = doc.data();
+
+      // When status changes to 'connected', hide the QR overlay!
+      if (data.status === 'connected') {
+        qrOverlay.classList.add('hidden');
+        connectionBadge.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+        connectionBadge.textContent = '● Remote Connected';
+      } else if (data.status === 'waiting') {
+        qrOverlay.classList.remove('hidden');
+        connectionBadge.className = 'px-2.5 py-0.5 rounded-full text-xs font-mono bg-zinc-800 text-zinc-400';
+        connectionBadge.textContent = 'Waiting for Remote...';
+      }
+
+      // Stream media if selected
+      if (data.playingItem && data.playingItem.id) {
+        const item = data.playingItem;
+        footerTitle.textContent = 'Now Streaming: ' + (item.title || item.name || 'Movie');
+        standbyBg.classList.add('hidden');
+        videoIframe.classList.remove('hidden');
+
+        const embedUrl = item.type === 'tv'
+          ? 'https://vidsrc.to/embed/tv/' + item.id + '/' + (data.season || 1) + '/' + (data.episode || 1)
+          : 'https://vidsrc.to/embed/movie/' + item.id;
+
+        if (videoIframe.src !== embedUrl) {
+          videoIframe.src = embedUrl;
+        }
+      } else if (data.action === 'close' || !data.playingItem) {
+        footerTitle.textContent = '';
+        standbyBg.classList.remove('hidden');
+        videoIframe.classList.add('hidden');
+        videoIframe.src = '';
+      }
+
+      // Handle real-time actions: play, pause, seek, volume
+      if (data.action && data.action !== 'none') {
+        const ts = data.lastCommandTimestamp || Date.now();
+        if (ts !== lastActionTimestamp) {
+          lastActionTimestamp = ts;
+          const cw = videoIframe.contentWindow;
+          if (cw) {
+            if (data.action === 'play') {
+              cw.postMessage('play', '*');
+              cw.postMessage({ api: 'play' }, '*');
+            } else if (data.action === 'pause') {
+              cw.postMessage('pause', '*');
+              cw.postMessage({ api: 'pause' }, '*');
+            } else if (data.action === 'rewind') {
+              cw.postMessage({ api: 'rewind', set: 10 }, '*');
+            } else if (data.action === 'forward') {
+              cw.postMessage({ api: 'forward', set: 10 }, '*');
+            }
+          }
+        }
+      }
+
+      // Volume control
+      if (typeof data.volume === 'number') {
+        const cw = videoIframe.contentWindow;
+        if (cw) {
+          cw.postMessage({ api: 'volume', set: data.volume / 100 }, '*');
+        }
+      }
+    });
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  </script>
+</body>
+</html>

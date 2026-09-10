@@ -16,7 +16,12 @@ service cloud.firestore {
     }
 
     match /remote_sessions/{sessionCode} {
-      // Anyone with the 6-digit pairing code can read and update the session for live playback sync
+      // Anyone with the pairing code can read and update the session for live playback sync
+      allow read, write: if true;
+    }
+
+    match /rooms/{roomCode} {
+      // Direct 4-digit room node for TV player & remote control
       allow read, write: if true;
     }
 

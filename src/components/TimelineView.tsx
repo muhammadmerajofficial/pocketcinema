@@ -18,6 +18,7 @@ interface TimelineViewProps {
   isLoading?: boolean;
   isLoadingMore?: boolean;
   hasMore?: boolean;
+  disabled?: boolean;
   onSelectItem: (index: number) => void;
   onOpenDetails: (item: MediaItem) => void;
   onPlayItem?: (item: MediaItem) => void;
@@ -31,6 +32,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   isLoading = false,
   isLoadingMore = false,
   hasMore = false,
+  disabled = false,
   onSelectItem,
   onOpenDetails,
   onPlayItem,
@@ -87,6 +89,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                   key={`${item.id}-${index}`}
                   id={`media-card-${item.id}`}
                   onClick={() => {
+                    if (disabled) return;
                     soundFx.playClick('ok');
                     onSelectItem(index);
                     if (onPlayItem) {
@@ -95,10 +98,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                       onOpenDetails(item);
                     }
                   }}
-                  className={`group relative flex flex-col rounded-xl overflow-hidden cursor-pointer transition-all duration-300 select-none ${
-                    isSelected
-                      ? 'bg-zinc-900/95 ring-2 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)] scale-[1.02] z-10'
-                      : 'bg-zinc-900/60 hover:bg-zinc-900/90 border border-zinc-800/80 hover:border-zinc-700/80 hover:shadow-lg hover:shadow-black/50'
+                  className={`relative flex flex-col rounded-xl overflow-hidden transition-all duration-300 select-none ${
+                    disabled
+                      ? 'opacity-40 pointer-events-none cursor-not-allowed bg-zinc-900/40 border border-zinc-800/40'
+                      : isSelected
+                      ? 'group cursor-pointer bg-zinc-900/95 ring-2 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)] scale-[1.02] z-10'
+                      : 'group cursor-pointer bg-zinc-900/60 hover:bg-zinc-900/90 border border-zinc-800/80 hover:border-zinc-700/80 hover:shadow-lg hover:shadow-black/50'
                   }`}
                 >
                   {/* Active Remote Indicator Pill */}
@@ -170,12 +175,16 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                       </span>
                       <button
                         type="button"
+                        disabled={disabled}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (disabled) return;
                           soundFx.playClick('nav');
                           onOpenDetails(item);
                         }}
-                        className="text-zinc-400 hover:text-amber-300 font-mono text-[9px] shrink-0 flex items-center gap-0.5 p-1 -m-1 rounded hover:bg-zinc-800 transition-colors"
+                        className={`text-zinc-400 hover:text-amber-300 font-mono text-[9px] shrink-0 flex items-center gap-0.5 p-1 -m-1 rounded hover:bg-zinc-800 transition-colors ${
+                          disabled ? 'pointer-events-none opacity-40 cursor-not-allowed' : ''
+                        }`}
                         title="View Synopsis"
                       >
                         <Info className="w-2.5 h-2.5" />

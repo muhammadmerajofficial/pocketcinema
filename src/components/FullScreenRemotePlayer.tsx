@@ -97,27 +97,35 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
         cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'pause' }, '*');
         cw.postMessage({ event: 'command', func: 'pause', args: [] }, '*');
       } else if (command === 'seek') {
-        const targetSec = Number(value) || 0;
+        const targetSec = Math.max(0, Number(value) || 0);
         localCurrentTimeRef.current = targetSec;
 
-        // PlayerJS seek & time commands
+        // 1. PlayerJS seek & time commands (object and JSON string)
         cw.postMessage({ api: 'seek', set: targetSec }, '*');
         cw.postMessage({ api: 'time', set: targetSec }, '*');
         cw.postMessage(JSON.stringify({ api: 'seek', set: targetSec }), '*');
         cw.postMessage(JSON.stringify({ api: 'time', set: targetSec }), '*');
+        cw.postMessage(`seek:${targetSec}`, '*');
+        cw.postMessage(`time:${targetSec}`, '*');
 
         // Relative delta (e.g. forward 10 or rewind 10)
         if (typeof extra === 'number') {
           const delta = extra;
-          cw.postMessage({ api: delta > 0 ? 'forward' : 'rewind', set: Math.abs(delta) }, '*');
-          cw.postMessage(JSON.stringify({ api: delta > 0 ? 'forward' : 'rewind', set: Math.abs(delta) }), '*');
+          const deltaCmd = delta > 0 ? 'forward' : 'rewind';
+          const absVal = Math.abs(delta);
+          cw.postMessage({ api: deltaCmd, set: absVal }, '*');
+          cw.postMessage(JSON.stringify({ api: deltaCmd, set: absVal }), '*');
+          cw.postMessage(`${deltaCmd}:${absVal}`, '*');
         }
 
-        // Player.js spec
+        // 2. Player.js specification
         cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }, '*');
-        // JWPlayer / Generic
+        cw.postMessage(JSON.stringify({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }), '*');
+
+        // 3. JWPlayer / VideoJS / HTML5 Generic
         cw.postMessage({ event: 'command', func: 'seek', args: [targetSec] }, '*');
         cw.postMessage({ action: 'seek', time: targetSec }, '*');
+        cw.postMessage({ type: 'seek', time: targetSec }, '*');
       } else if (command === 'volume') {
         const vol = Number(value);
         cw.postMessage({ api: 'volume', set: vol / 100 }, '*');
@@ -172,10 +180,59 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
       return;
     }
 
+    if (command === 'rewind') {
+      const delta = typeof extra === 'number' ? extra : -10;
+      const targetSec = Math.max(0, localCurrentTimeRef.current + delta);
+      localCurrentTimeRef.current = targetSec;
+      sendCommandToIframe('seek', targetSec, delta);
+      const now = Date.now();
+      const statusData = {
+        isPlaying: localIsPlayingRef.current,
+        currentTime: targetSec,
+        duration: localDurationRef.current,
+        volume: 100,
+        isMuted: false,
+        activeSeason: season,
+        activeEpisode: episode,
+        timestamp: now,
+      };
+      syncManager.broadcast({ type: 'PLAYER_STATUS', ...statusData });
+      if (pairingCode) {
+        updateRemoteSession(pairingCode, { playerStatus: statusData });
+      }
+      return;
+    }
+
+    if (command === 'forward') {
+      const delta = typeof extra === 'number' ? extra : 10;
+      const targetSec = Math.min(localDurationRef.current, localCurrentTimeRef.current + delta);
+      localCurrentTimeRef.current = targetSec;
+      sendCommandToIframe('seek', targetSec, delta);
+      const now = Date.now();
+      const statusData = {
+        isPlaying: localIsPlayingRef.current,
+        currentTime: targetSec,
+        duration: localDurationRef.current,
+        volume: 100,
+        isMuted: false,
+        activeSeason: season,
+        activeEpisode: episode,
+        timestamp: now,
+      };
+      syncManager.broadcast({ type: 'PLAYER_STATUS', ...statusData });
+      if (pairingCode) {
+        updateRemoteSession(pairingCode, { playerStatus: statusData });
+      }
+      return;
+    }
+
     if (command === 'play') {
       localIsPlayingRef.current = true;
     } else if (command === 'pause') {
       localIsPlayingRef.current = false;
+    } else if (command === 'seek') {
+      localIsPlayingRef.current = true;
+      sendCommandToIframe('play');
     }
 
     sendCommandToIframe(command, value, extra);
@@ -395,26 +452,25 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
         allowFullScreen
         onLoad={() => {
           setIsIframeLoaded(true);
-          // Auto-trigger play commands immediately on load for smooth playback start
+          // Auto-trigger volume 100% and play commands immediately on load
+          sendCommandToIframe('volume', 100);
+          sendCommandToIframe('unmute');
           sendCommandToIframe('play');
-          setTimeout(() => sendCommandToIframe('play'), 600);
-          setTimeout(() => sendCommandToIframe('play'), 1500);
+          setTimeout(() => {
+            sendCommandToIframe('volume', 100);
+            sendCommandToIframe('unmute');
+            sendCommandToIframe('play');
+          }, 400);
+          setTimeout(() => {
+            sendCommandToIframe('volume', 100);
+            sendCommandToIframe('play');
+          }, 1200);
+          setTimeout(() => {
+            sendCommandToIframe('volume', 100);
+            sendCommandToIframe('play');
+          }, 2400);
         }}
       />
-
-      {/* Tiny subtle connection indicator in top-left that fades out after loading */}
-      <div 
-        className={`absolute top-3 left-4 z-50 pointer-events-none transition-opacity duration-1000 ${
-          isIframeLoaded ? 'opacity-0 hover:opacity-100' : 'opacity-80'
-        }`}
-      >
-        <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-emerald-500/30 text-[11px] text-emerald-400 font-mono">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-          <span>
-            Synced: {item.title} {item.category !== 'movies' ? `(S${season} : E${episode})` : ''}
-          </span>
-        </div>
-      </div>
     </div>
   );
 };
