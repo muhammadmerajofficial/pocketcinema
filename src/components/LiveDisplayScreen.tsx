@@ -27,6 +27,12 @@ import {
   updateRoom 
 } from '../services/remotePairing';
 import { soundFx } from '../utils/sound';
+import { 
+  openFullscreen, 
+  closeFullscreen, 
+  isFullscreenActive, 
+  registerTvDpadNavigation 
+} from '../utils/tvNavigation';
 
 export const LiveDisplayScreen: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -276,30 +282,52 @@ export const LiveDisplayScreen: React.FC = () => {
     };
   }, [roomCode, roomStatus]);
 
-  // Auto fullscreen when player is active
+  // Auto fullscreen when TV display is active
   useEffect(() => {
-    if (playingItem) {
-      const enterFs = () => {
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen?.().catch(() => {});
-        }
-      };
-      enterFs();
-      window.addEventListener('click', enterFs, { once: true });
-      window.addEventListener('keydown', enterFs, { once: true });
-      return () => {
-        window.removeEventListener('click', enterFs);
-        window.removeEventListener('keydown', enterFs);
-      };
-    }
+    const enterFs = () => {
+      if (!isFullscreenActive()) {
+        openFullscreen(containerRef.current || document.documentElement);
+      }
+    };
+    enterFs();
+    window.addEventListener('click', enterFs, { once: true });
+    window.addEventListener('keydown', enterFs, { once: true });
+    window.addEventListener('touchstart', enterFs, { once: true });
+    return () => {
+      window.removeEventListener('click', enterFs);
+      window.removeEventListener('keydown', enterFs);
+      window.removeEventListener('touchstart', enterFs);
+    };
   }, [playingItem]);
 
+  // Smart TV Remote D-Pad Navigation & Back key handling
+  useEffect(() => {
+    const unregister = registerTvDpadNavigation({
+      onBack: () => {
+        setIsQROverlayOpen((prev) => !prev);
+      },
+      onPlayPauseToggle: () => {
+        setLatestCommand((prev) => ({
+          command: prev?.command === 'play' ? 'pause' : 'play',
+          timestamp: Date.now(),
+        }));
+      },
+      onSeekForward: () => {
+        setLatestCommand({ command: 'seek', extra: 10, timestamp: Date.now() });
+      },
+      onSeekBackward: () => {
+        setLatestCommand({ command: 'seek', extra: -10, timestamp: Date.now() });
+      },
+    });
+    return unregister;
+  }, []);
+
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => {});
+    if (!isFullscreenActive()) {
+      openFullscreen(containerRef.current || document.documentElement);
       setIsFullscreen(true);
     } else {
-      document.exitFullscreen().catch(() => {});
+      closeFullscreen();
       setIsFullscreen(false);
     }
   };
@@ -389,10 +417,22 @@ export const LiveDisplayScreen: React.FC = () => {
           <button
             type="button"
             onClick={handleCopyCode}
-            className="p-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+            tabIndex={0}
+            className="interactive-element p-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer focus:outline-none"
             title="Copy Room ID"
           >
             {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-zinc-400" />}
+          </button>
+
+          {/* Fullscreen Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            tabIndex={0}
+            className="interactive-element p-1.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer focus:outline-none"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Enter TV Fullscreen'}
+          >
+            {isFullscreen ? <Minimize className="w-3.5 h-3.5 text-zinc-400" /> : <Maximize className="w-3.5 h-3.5 text-zinc-400" />}
           </button>
 
           {/* Toggle QR Overlay Button */}
@@ -400,7 +440,8 @@ export const LiveDisplayScreen: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsQROverlayOpen(true)}
-              className="p-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 transition-colors cursor-pointer border border-amber-500/30"
+              tabIndex={0}
+              className="interactive-element p-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 transition-colors cursor-pointer border border-amber-500/30 focus:outline-none"
               title="Show Full QR Code"
             >
               <QrCode className="w-3.5 h-3.5 text-amber-400" />
@@ -496,7 +537,8 @@ export const LiveDisplayScreen: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleCopyCode}
-                  className="px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-md"
+                  tabIndex={0}
+                  className="interactive-element px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-md focus:outline-none"
                   title="Copy Room ID"
                 >
                   {copiedCode ? (
@@ -549,7 +591,8 @@ export const LiveDisplayScreen: React.FC = () => {
                 href={remotePageUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-amber-400/90 hover:text-amber-300 hover:underline"
+                tabIndex={0}
+                className="interactive-element inline-flex items-center gap-1.5 text-amber-400/90 hover:text-amber-300 hover:underline focus:outline-none"
               >
                 <span>Open remote in new window</span>
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -558,7 +601,8 @@ export const LiveDisplayScreen: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsQROverlayOpen(false)}
-                className="text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+                tabIndex={0}
+                className="interactive-element text-zinc-400 hover:text-zinc-200 underline cursor-pointer focus:outline-none"
               >
                 Watch directly without remote
               </button>

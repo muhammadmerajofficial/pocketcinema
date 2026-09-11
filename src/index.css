@@ -1,7 +1,43 @@
 @import "tailwindcss";
 
-html {
+/* Smart TV & Standard Viewport Reset */
+html, body {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Extra scrollbar hide for TV screens */
+  background-color: #000; /* Clean TV dark background */
   scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Smart TV Video player, iframe, and poster containment */
+video, img.poster, iframe {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Smart TV Remote Focus & D-pad Navigation Highlight */
+button:focus, 
+a:focus, 
+.interactive-element:focus, 
+[tabindex]:focus, 
+input:focus, 
+select:focus {
+  outline: 4px solid #ffcc00 !important;
+  outline-offset: 2px;
+  transform: scale(1.04);
+  transition: all 0.2s ease;
+  z-index: 50;
+}
+
+/* Smart TV Specific Large Screen (16:9 1080p/4K) Typography Scale */
+@media screen and (min-width: 1280px) {
+  body {
+    font-size: 20px;
+  }
 }
 
 /* Custom smooth dark scrollbar */

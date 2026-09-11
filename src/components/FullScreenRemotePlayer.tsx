@@ -3,6 +3,7 @@ import { MediaItem } from '../types';
 import { ALL_PLAYER_SERVERS, formatEmbedMasterId } from '../utils/servers';
 import { updateRemoteSession, QUICK_CONNECT_CODE } from '../services/remotePairing';
 import { syncManager, SyncMessage } from '../utils/syncChannel';
+import { openFullscreen, registerTvDpadNavigation } from '../utils/tvNavigation';
 
 interface FullScreenRemotePlayerProps {
   item: MediaItem;
@@ -410,8 +411,10 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
     return () => clearInterval(interval);
   }, [isIframeLoaded, pairingCode, season, episode]);
 
-  // Request fullscreen on video load if supported
+  // Request fullscreen and keep screen awake on video load
   useEffect(() => {
+    openFullscreen();
+
     // Keep screen awake via Screen Wake Lock API
     let wakeLockSentinel: any = null;
     if ('wakeLock' in navigator && (navigator as any).wakeLock) {
@@ -425,9 +428,33 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
     };
   }, []);
 
-  // Force play & 100% full volume on any user touch/click/keypress to bypass browser audio restrictions
+  // Smart TV Remote D-Pad & Media Key Navigation
+  useEffect(() => {
+    const unregister = registerTvDpadNavigation({
+      onBack: () => {
+        if (onExit) onExit();
+      },
+      onPlayPauseToggle: () => {
+        if (localIsPlayingRef.current) {
+          sendCommandToIframe('pause');
+        } else {
+          sendCommandToIframe('play');
+        }
+      },
+      onSeekForward: () => {
+        sendCommandToIframe('seek', localCurrentTimeRef.current + 10, 10);
+      },
+      onSeekBackward: () => {
+        sendCommandToIframe('seek', Math.max(0, localCurrentTimeRef.current - 10), -10);
+      },
+    });
+    return unregister;
+  }, [onExit]);
+
+  // Force play, fullscreen & 100% full volume on any user touch/click/keypress to bypass browser audio restrictions
   useEffect(() => {
     const handleGesture = () => {
+      openFullscreen();
       sendCommandToIframe('volume', 100);
       sendCommandToIframe('unmute');
       sendCommandToIframe('play');
@@ -464,6 +491,7 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
         key={`${item.id}-${serverIndex}-${season}-${episode}`}
         src={playerUrl}
         title={item.title}
+        tabIndex={0}
         className="w-full h-full border-0 bg-black block"
         style={{
           width: '100%',
@@ -471,27 +499,24 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
           border: 'none',
           outline: 'none',
         }}
-        allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *"
+        allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *; accelerometer *; gyroscope *; clipboard-write *"
         allowFullScreen
         onLoad={() => {
           setIsIframeLoaded(true);
+          localIsPlayingRef.current = true;
           // Auto-trigger volume 100% and play commands immediately on load
-          sendCommandToIframe('volume', 100);
-          sendCommandToIframe('unmute');
-          sendCommandToIframe('play');
-          setTimeout(() => {
+          const triggerAutoPlay = () => {
             sendCommandToIframe('volume', 100);
             sendCommandToIframe('unmute');
             sendCommandToIframe('play');
-          }, 400);
-          setTimeout(() => {
-            sendCommandToIframe('volume', 100);
-            sendCommandToIframe('play');
-          }, 1200);
-          setTimeout(() => {
-            sendCommandToIframe('volume', 100);
-            sendCommandToIframe('play');
-          }, 2400);
+          };
+          triggerAutoPlay();
+          setTimeout(triggerAutoPlay, 150);
+          setTimeout(triggerAutoPlay, 400);
+          setTimeout(triggerAutoPlay, 800);
+          setTimeout(triggerAutoPlay, 1500);
+          setTimeout(triggerAutoPlay, 2500);
+          setTimeout(triggerAutoPlay, 4000);
         }}
       />
     </div>
