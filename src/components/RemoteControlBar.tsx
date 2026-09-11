@@ -30,6 +30,7 @@ interface RemoteControlBarProps {
   currentIndex: number;
   isPlaying?: boolean;
   isLocked?: boolean;
+  roomCode?: string;
 }
 
 // Format seconds to mm:ss or hh:mm:ss
@@ -53,6 +54,7 @@ export const RemoteControlBar: React.FC<RemoteControlBarProps> = ({
   currentIndex,
   isPlaying = false,
   isLocked = false,
+  roomCode = '',
 }) => {
   // Remote player live state synced with the EmbedMaster player
   const [playerStatus, setPlayerStatus] = useState<{
@@ -210,6 +212,7 @@ export const RemoteControlBar: React.FC<RemoteControlBarProps> = ({
 
       {/* 1. ACTIVE PLAYER REMOTE CONTROL DECK (When Playing) */}
       {isPlaying && remoteMode === 'player' ? (
+        /* 2. ACTIVE PLAYER REMOTE CONTROL DECK (When Playing) */
         <div 
           id="remote-player-deck"
           className={`w-full p-3 sm:p-4 bg-gradient-to-b from-zinc-900/95 via-zinc-950/95 to-black rounded-2xl border border-amber-500/40 shadow-2xl shadow-black flex flex-col gap-3 transition-all ${

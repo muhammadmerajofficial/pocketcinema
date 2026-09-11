@@ -1,9 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   ChevronUp, 
   ChevronDown, 
   ChevronLeft, 
-  ChevronRight 
+  ChevronRight,
+  Gamepad2,
+  X
 } from 'lucide-react';
 import { MediaItem } from '../types';
 import { soundFx } from '../utils/sound';
@@ -27,6 +29,8 @@ export const PosterSelectorDpad: React.FC<PosterSelectorDpadProps> = ({
   category,
   hasBottomBar = false,
 }) => {
+  const [isDpadHidden, setIsDpadHidden] = useState<boolean>(false);
+
   const getGridCols = () => {
     if (typeof window === 'undefined') return 5;
     const w = window.innerWidth;
@@ -119,21 +123,60 @@ export const PosterSelectorDpad: React.FC<PosterSelectorDpadProps> = ({
   const currentItem = items[selectedIndex] || items[0];
   const isSeries = category === 'tv' || category === 'anime' || (currentItem && (currentItem.category === 'tv' || currentItem.category === 'anime'));
 
+  if (isDpadHidden) {
+    return (
+      <div 
+        id="dpad-restore-toggle"
+        className={`fixed left-4 sm:left-6 z-50 transition-all animate-fadeIn ${
+          hasBottomBar 
+            ? (isSeries ? 'bottom-26 sm:bottom-28' : 'bottom-18 sm:bottom-20') 
+            : 'bottom-4 sm:bottom-6'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            soundFx.playClick('switch');
+            setIsDpadHidden(false);
+          }}
+          className="px-2.5 py-1.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-800 hover:border-amber-500/40 text-zinc-400 hover:text-amber-400 text-xs font-semibold flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer transition-all active:scale-95"
+          title="Show D-Pad Navigation"
+        >
+          <Gamepad2 className="w-3.5 h-3.5" />
+          <span className="text-[11px] font-sans">D-Pad</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div 
       id="poster-selector-dpad-only"
       aria-label="D-Pad Controller"
-      className={`fixed left-4 sm:left-6 z-50 select-none touch-manipulation transition-all animate-fadeIn ${
+      className={`fixed left-4 sm:left-6 z-50 select-none touch-manipulation transition-all animate-fadeIn flex flex-col items-center gap-1 ${
         hasBottomBar 
           ? (isSeries ? 'bottom-26 sm:bottom-28' : 'bottom-18 sm:bottom-20') 
           : 'bottom-4 sm:bottom-6'
       }`}
     >
       {/* 3x3 D-Pad Unit: ONLY Left, Right, Up, Down and Center OK */}
-      <div 
-        id="movie-collection-dpad"
-        className="w-24 h-24 sm:w-28 sm:h-28 aspect-square rounded-full bg-zinc-950/85 backdrop-blur-xl border border-amber-500/30 p-1 shadow-[0_8px_30px_rgba(0,0,0,0.8)] grid grid-cols-3 grid-rows-3 items-center justify-items-center"
-      >
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => {
+            soundFx.playClick('switch');
+            setIsDpadHidden(true);
+          }}
+          className="absolute -top-2 -right-2 z-10 w-5 h-5 rounded-full bg-zinc-900/90 border border-zinc-700 hover:border-zinc-500 text-zinc-400 hover:text-white flex items-center justify-center cursor-pointer transition-all shadow-md active:scale-90"
+          title="Hide D-Pad (operate with mouse/touch directly)"
+        >
+          <X className="w-3 h-3" />
+        </button>
+
+        <div 
+          id="movie-collection-dpad"
+          className="w-24 h-24 sm:w-28 sm:h-28 aspect-square rounded-full bg-zinc-950/85 backdrop-blur-xl border border-amber-500/30 p-1 shadow-[0_8px_30px_rgba(0,0,0,0.8)] grid grid-cols-3 grid-rows-3 items-center justify-items-center"
+        >
         {/* UP BUTTON */}
         <div className="col-start-2 row-start-1 w-full h-full flex items-center justify-center">
           <button
@@ -203,6 +246,7 @@ export const PosterSelectorDpad: React.FC<PosterSelectorDpadProps> = ({
             <ChevronDown className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

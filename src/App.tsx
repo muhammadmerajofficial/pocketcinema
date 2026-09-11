@@ -668,7 +668,7 @@ export default function App() {
   const hasMountedRef = useRef(false);
 
   // Fetch initial media (Page 1) when Category or Search Query Changes
-  const fetchInitialMedia = useCallback(async (cat: CategoryType, query: string, shouldAutoPlay = true) => {
+  const fetchInitialMedia = useCallback(async (cat: CategoryType, query: string, shouldAutoPlay = false) => {
     setIsLoading(true);
     setPage(1);
     isFetchingRef.current = true;
@@ -733,7 +733,7 @@ export default function App() {
       }, 350);
     } else {
       autoPlayCategoryChangeRef.current = false;
-      fetchInitialMedia(activeCategory, '', true);
+      fetchInitialMedia(activeCategory, '', false);
     }
 
     return () => {
@@ -1052,10 +1052,6 @@ export default function App() {
             onSelectItem={(idx) => {
               if (isScreenLocked) return;
               setSelectedIndex(idx);
-              const target = mediaItems[idx];
-              if (target) {
-                handlePlayMedia(target, 1, 1);
-              }
             }}
             onOpenDetails={(item) => {
               if (isScreenLocked) return;
@@ -1080,10 +1076,6 @@ export default function App() {
         onSelectItem={(idx) => {
           if (isScreenLocked) return;
           setSelectedIndex(idx);
-          const target = mediaItems[idx];
-          if (target) {
-            handlePlayMedia(target, 1, 1);
-          }
         }}
         onPlayItem={(item) => {
           if (isScreenLocked) return;

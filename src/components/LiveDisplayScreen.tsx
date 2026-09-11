@@ -11,7 +11,15 @@ import {
   Film,
   RefreshCw,
   QrCode,
-  X
+  X,
+  MousePointer,
+  Play,
+  Pause,
+  RotateCcw,
+  RotateCw,
+  Volume1,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { MediaItem } from '../types';
@@ -115,6 +123,66 @@ export const LiveDisplayScreen: React.FC = () => {
   const [volume, setVolume] = useState<number>(100);
   const [latestCommand, setLatestCommand] = useState<{ command: string; value?: any; extra?: any; timestamp: number } | null>(null);
   const lastActionTimestampRef = useRef<number>(0);
+
+  // Virtual Air Mouse / Remote Mouse Cursor
+  const [virtualCursor, setVirtualCursor] = useState<{ x: number; y: number; visible: boolean }>({
+    x: 50,
+    y: 50,
+    visible: false,
+  });
+  const cursorHideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Click ripple animation state
+  const [clickRipple, setClickRipple] = useState<{ x: number; y: number; id: number } | null>(null);
+  const lastMouseClickTimestampRef = useRef<number>(0);
+
+  // Direct On-Screen Touch / Mouse Control Dock
+  const [showTouchDock, setShowTouchDock] = useState(false);
+  const touchDockTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetCursorTimeout = () => {
+    if (cursorHideTimerRef.current) clearTimeout(cursorHideTimerRef.current);
+    cursorHideTimerRef.current = setTimeout(() => {
+      setVirtualCursor((prev) => ({ ...prev, visible: false }));
+    }, 4500);
+  };
+
+  const triggerTouchActivity = () => {
+    setShowTouchDock(true);
+    if (touchDockTimerRef.current) clearTimeout(touchDockTimerRef.current);
+    touchDockTimerRef.current = setTimeout(() => {
+      setShowTouchDock(false);
+    }, 3500);
+  };
+
+  const handleVirtualMouseClick = (pctX: number, pctY: number, button: 'left' | 'right' = 'left') => {
+    setClickRipple({ x: pctX, y: pctY, id: Date.now() });
+    soundFx.playClick(button === 'left' ? 'ok' : 'switch');
+
+    if (button === 'right') {
+      setIsQROverlayOpen((prev) => !prev);
+      return;
+    }
+
+    const px = (pctX / 100) * window.innerWidth;
+    const py = (pctY / 100) * window.innerHeight;
+
+    const targetEl = document.elementFromPoint(px, py);
+    if (targetEl) {
+      const interactive = targetEl.closest('button, a, input, [tabindex], .interactive-element');
+      if (interactive && typeof (interactive as HTMLElement).click === 'function') {
+        (interactive as HTMLElement).click();
+        return;
+      }
+    }
+
+    // If clicked elsewhere, toggle play/pause and trigger touch dock
+    setLatestCommand((prev) => ({
+      command: prev?.command === 'play' ? 'pause' : 'play',
+      timestamp: Date.now(),
+    }));
+    triggerTouchActivity();
+  };
 
   // Helper to generate the exact controller remote URL across all hosting environments
   const getRemoteUrl = () => {
@@ -264,6 +332,16 @@ export const LiveDisplayScreen: React.FC = () => {
           }
         }
       }
+
+      // Virtual Air Mouse cloud synchronization
+      if ((data as any).mouseCursor && typeof (data as any).mouseCursor.x === 'number') {
+        setVirtualCursor({ x: (data as any).mouseCursor.x, y: (data as any).mouseCursor.y, visible: true });
+        resetCursorTimeout();
+      }
+      if ((data as any).mouseClick && (data as any).mouseClick.timestamp && (data as any).mouseClick.timestamp !== lastMouseClickTimestampRef.current) {
+        lastMouseClickTimestampRef.current = (data as any).mouseClick.timestamp;
+        handleVirtualMouseClick((data as any).mouseClick.x, (data as any).mouseClick.y, (data as any).mouseClick.button || 'left');
+      }
     });
 
     return () => {
@@ -321,6 +399,20 @@ export const LiveDisplayScreen: React.FC = () => {
         } else {
           setLatestCommand({ command: msg.command, value: msg.value, extra: msg.extra, timestamp: msg.timestamp });
         }
+      } else if (msg.type === 'MOUSE_MOVE') {
+        setVirtualCursor({ x: msg.x, y: msg.y, visible: true });
+        resetCursorTimeout();
+      } else if (msg.type === 'MOUSE_CLICK') {
+        setVirtualCursor({ x: msg.x, y: msg.y, visible: true });
+        resetCursorTimeout();
+        handleVirtualMouseClick(msg.x, msg.y, msg.button || 'left');
+      } else if (msg.type === 'MOUSE_SCROLL') {
+        if (msg.deltaY > 0) {
+          setLatestCommand({ command: 'seek', extra: 10, timestamp: Date.now() });
+        } else {
+          setLatestCommand({ command: 'seek', extra: -10, timestamp: Date.now() });
+        }
+        triggerTouchActivity();
       }
     });
 
@@ -394,6 +486,10 @@ export const LiveDisplayScreen: React.FC = () => {
     <div
       ref={containerRef}
       id="live-display-screen"
+      onMouseMove={triggerTouchActivity}
+      onTouchStart={triggerTouchActivity}
+      onClick={triggerTouchActivity}
+      onDoubleClick={toggleFullscreen}
       className="fixed inset-0 w-screen h-screen min-h-screen overflow-hidden bg-black text-white m-0 p-0 z-50 select-none font-sans"
       style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}
     >
@@ -657,6 +753,174 @@ export const LiveDisplayScreen: React.FC = () => {
           </footer>
         </div>
       )}
+
+      {/* 5. Virtual Magic Air Mouse Cursor */}
+      {virtualCursor.visible && (
+        <div
+          id="tv-virtual-mouse-cursor"
+          className="fixed pointer-events-none z-[10005] transition-all duration-75 ease-out -translate-x-1/2 -translate-y-1/2"
+          style={{
+            left: `${virtualCursor.x}%`,
+            top: `${virtualCursor.y}%`,
+          }}
+        >
+          <div className="relative flex items-center justify-center">
+            <div className="absolute w-9 h-9 rounded-full bg-amber-400/20 blur-sm animate-ping" />
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-300 via-amber-400 to-amber-500 border-2 border-white shadow-[0_0_15px_rgba(251,191,36,0.9)] flex items-center justify-center">
+              <MousePointer className="w-3.5 h-3.5 text-black stroke-[3]" />
+            </div>
+            <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-black/85 px-2 py-0.5 rounded-full border border-amber-500/40 text-[9px] font-mono font-bold text-amber-300 whitespace-nowrap shadow-md">
+              Air Mouse
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Virtual Click Ripple Effect */}
+      {clickRipple && (
+        <div
+          key={clickRipple.id}
+          className="fixed pointer-events-none z-[10006] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-400 animate-ping"
+          style={{
+            left: `${clickRipple.x}%`,
+            top: `${clickRipple.y}%`,
+            width: '48px',
+            height: '48px',
+            boxShadow: '0 0 25px rgba(52,211,153,0.9)',
+          }}
+        />
+      )}
+
+      {/* 7. Direct Touch & Mouse Quick Floating On-Screen Controls */}
+      <div 
+        id="tv-onscreen-touch-dock"
+        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[10004] transition-all duration-300 flex items-center gap-2 p-2 rounded-2xl bg-black/85 backdrop-blur-xl border border-zinc-800 shadow-[0_10px_40px_rgba(0,0,0,0.85)] ${
+          showTouchDock ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'
+        }`}
+      >
+        {/* Rewind 10s */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            soundFx.playClick('nav');
+            setLatestCommand({ command: 'seek', extra: -10, timestamp: Date.now() });
+            triggerTouchActivity();
+          }}
+          className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
+          title="Rewind 10s"
+        >
+          <RotateCcw className="w-5 h-5" />
+        </button>
+
+        {/* Play/Pause */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            soundFx.playClick('ok');
+            setLatestCommand((prev) => ({
+              command: prev?.command === 'play' ? 'pause' : 'play',
+              timestamp: Date.now(),
+            }));
+            triggerTouchActivity();
+          }}
+          className="interactive-element px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center gap-2 cursor-pointer transition-all active:scale-95 shadow-md shadow-amber-500/20"
+          title="Play/Pause"
+        >
+          {latestCommand?.command === 'pause' ? (
+            <>
+              <Play className="w-5 h-5 fill-current" />
+              <span className="text-xs">Play</span>
+            </>
+          ) : (
+            <>
+              <Pause className="w-5 h-5 fill-current" />
+              <span className="text-xs">Pause</span>
+            </>
+          )}
+        </button>
+
+        {/* Forward 10s */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            soundFx.playClick('nav');
+            setLatestCommand({ command: 'seek', extra: 10, timestamp: Date.now() });
+            triggerTouchActivity();
+          }}
+          className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
+          title="Forward 10s"
+        >
+          <RotateCw className="w-5 h-5" />
+        </button>
+
+        <div className="h-6 w-px bg-zinc-700/60 mx-1" />
+
+        {/* Volume Down */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            soundFx.playClick('switch');
+            const nextVol = Math.max(0, volume - 10);
+            setVolume(nextVol);
+            setLatestCommand({ command: 'volume', value: nextVol, timestamp: Date.now() });
+            triggerTouchActivity();
+          }}
+          className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
+          title="Volume Down (-10%)"
+        >
+          <Volume1 className="w-5 h-5" />
+        </button>
+
+        {/* Volume Up */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            soundFx.playClick('switch');
+            const nextVol = Math.min(100, volume + 10);
+            setVolume(nextVol);
+            setLatestCommand({ command: 'volume', value: nextVol, timestamp: Date.now() });
+            triggerTouchActivity();
+          }}
+          className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
+          title="Volume Up (+10%)"
+        >
+          <Volume2 className="w-5 h-5" />
+        </button>
+
+        {/* Toggle QR Overlay */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            soundFx.playClick('switch');
+            setIsQROverlayOpen((prev) => !prev);
+            triggerTouchActivity();
+          }}
+          className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-amber-400 hover:text-amber-300 cursor-pointer transition-all active:scale-95"
+          title={isQROverlayOpen ? 'Hide Pairing Code' : 'Show Pairing Code'}
+        >
+          <QrCode className="w-5 h-5" />
+        </button>
+
+        {/* Fullscreen */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+            triggerTouchActivity();
+          }}
+          className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
+          title="Toggle Fullscreen"
+        >
+          {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+        </button>
+      </div>
     </div>
   );
 };
