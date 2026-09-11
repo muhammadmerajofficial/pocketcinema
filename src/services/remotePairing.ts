@@ -43,24 +43,37 @@ export function generate4DigitRoomCode(): string {
 export async function initRoom(roomCode: string, initialData: Partial<RoomData> = {}): Promise<RoomData> {
   const cleanCode = roomCode.trim();
   const roomRef = doc(db, 'rooms', cleanCode);
+
+  let initialStatus: 'waiting' | 'connected' | 'closed' = 'waiting';
+  try {
+    const snap = await getDoc(roomRef);
+    if (snap.exists()) {
+      const ex = snap.data() as RoomData;
+      if (ex.status === 'connected') {
+        initialStatus = 'connected';
+      }
+    }
+  } catch (_) {}
+
   const data: RoomData = {
     roomCode: cleanCode,
     isPlaying: false,
     currentTime: 0,
     action: 'none',
     volume: 1,
-    status: 'waiting',
+    status: initialStatus,
     playingItem: null,
     serverIndex: 0,
     season: 1,
     episode: 1,
     ...initialData,
+    ...(initialStatus === 'connected' ? { status: 'connected' } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
 
   try {
-    await setDoc(roomRef, sanitizeFirestoreData(data));
+    await setDoc(roomRef, sanitizeFirestoreData(data), { merge: true });
   } catch (e) {
     console.warn('[initRoom] Firestore error, local fallback active:', e);
   }
@@ -88,9 +101,37 @@ export async function connectToRoom(roomCode: string): Promise<{ success: boolea
     const snap = await getDoc(roomRef);
 
     if (!snap.exists()) {
+      // Room pre-activated by remote: write room data so TV connects immediately upon opening
+      const newRoomData: RoomData = {
+        roomCode: cleanCode,
+        status: 'connected',
+        action: 'play',
+        isPlaying: true,
+        currentTime: 0,
+        volume: 100,
+        serverIndex: 0,
+        season: 1,
+        episode: 1,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(roomRef, sanitizeFirestoreData(newRoomData));
+
+      try {
+        localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
+        localStorage.setItem('active_tv_screen_code', cleanCode);
+      } catch (_) {}
+
+      syncManager.broadcast({
+        type: 'ROOM_UPDATE',
+        roomCode: cleanCode,
+        data: { status: 'connected', action: 'play', isPlaying: true, volume: 100 }
+      } as any);
+
       return { 
-        success: false, 
-        message: `Room #${cleanCode} not found or inactive. Please open TV Screen for an active room code.` 
+        success: true, 
+        data: newRoomData, 
+        message: `Connected & activated TV Room #${cleanCode}!` 
       };
     }
 
@@ -112,6 +153,7 @@ export async function connectToRoom(roomCode: string): Promise<{ success: boolea
 
     try {
       localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
+      localStorage.setItem('active_tv_screen_code', cleanCode);
     } catch (_) {}
 
     syncManager.broadcast({
@@ -218,6 +260,66 @@ export async function closeRoom(roomCode: string): Promise<void> {
     type: 'DISCONNECT',
     timestamp: Date.now()
   });
+}
+
+/**
+ * Broadcast and persist the currently active TV screen room code so all remotes/main pages get it instantly
+ */
+export async function publishActiveTvRoom(roomCode: string): Promise<void> {
+  if (!roomCode) return;
+  const cleanCode = roomCode.trim().replace(/\D/g, '');
+  if (cleanCode.length !== 4) return;
+
+  try {
+    localStorage.setItem('active_tv_screen_code', cleanCode);
+  } catch (_) {}
+
+  // Instant cross-tab broadcast
+  syncManager.broadcast({
+    type: 'ROOM_ANNOUNCE',
+    roomCode: cleanCode,
+  });
+  syncManager.broadcast({
+    type: 'TV_ACTIVE_CODE',
+    code: cleanCode,
+  });
+
+  // Cross-device and cloud persistent sync via Firestore
+  try {
+    const activeRef = doc(db, 'rooms', '_active_tv');
+    await setDoc(activeRef, {
+      roomCode: cleanCode,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (err) {
+    console.warn('[publishActiveTvRoom] Firestore sync notice:', err);
+  }
+}
+
+/**
+ * Listen to the active TV screen room code across all devices, tabs, and iframes
+ */
+export function listenToActiveTvRoom(callback: (code: string) => void): () => void {
+  try {
+    const activeRef = doc(db, 'rooms', '_active_tv');
+    const unsub = onSnapshot(activeRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.roomCode && typeof data.roomCode === 'string') {
+          const code = data.roomCode.trim().replace(/\D/g, '');
+          if (code.length === 4) {
+            callback(code);
+          }
+        }
+      }
+    }, (err) => {
+      console.warn('[listenToActiveTvRoom] Snapshot notice:', err);
+    });
+    return unsub;
+  } catch (err) {
+    console.warn('[listenToActiveTvRoom] Listen error:', err);
+    return () => {};
+  }
 }
 
 export interface RemoteSessionData {

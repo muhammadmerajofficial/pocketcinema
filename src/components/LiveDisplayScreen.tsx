@@ -24,7 +24,8 @@ import {
   listenToRoom, 
   closeRoom, 
   RoomData, 
-  updateRoom 
+  updateRoom,
+  publishActiveTvRoom
 } from '../services/remotePairing';
 import { soundFx } from '../utils/sound';
 import { 
@@ -41,10 +42,47 @@ export const LiveDisplayScreen: React.FC = () => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [isQROverlayOpen, setIsQROverlayOpen] = useState(true);
 
-  // 1. Generate a fresh, new, unique 4-digit roomCode every time TV Screen opens
+  // 1. Determine 4-digit roomCode:
+  // If explicitly provided via URL (?room=XXXX or ?code=XXXX), use that.
+  // Otherwise, generate a fresh, new, unique 4-digit roomCode every time TV Screen opens
   const [roomCode] = useState<string>(() => {
-    return generate4DigitRoomCode();
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromUrl = urlParams.get('room') || urlParams.get('code');
+      if (fromUrl && fromUrl.trim().replace(/\D/g, '').length === 4) {
+        const clean = fromUrl.trim().replace(/\D/g, '');
+        try {
+          localStorage.setItem('active_tv_screen_code', clean);
+        } catch (_) {}
+        return clean;
+      }
+    } catch (_) {}
+    const fresh = generate4DigitRoomCode();
+    try {
+      localStorage.setItem('active_tv_screen_code', fresh);
+    } catch (_) {}
+    return fresh;
   });
+
+  // Broadcast and publish TV Screen room code immediately to Firestore, BroadcastChannel, and localStorage
+  useEffect(() => {
+    if (!roomCode) return;
+    
+    publishActiveTvRoom(roomCode);
+
+    // Re-announce periodically so any remote tab mounting or connecting catches it
+    const t1 = setTimeout(() => publishActiveTvRoom(roomCode), 150);
+    const t2 = setTimeout(() => publishActiveTvRoom(roomCode), 500);
+    const t3 = setTimeout(() => publishActiveTvRoom(roomCode), 1200);
+    const t4 = setInterval(() => publishActiveTvRoom(roomCode), 3500);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearInterval(t4);
+    };
+  }, [roomCode]);
 
   const [roomStatus, setRoomStatus] = useState<'waiting' | 'connected' | 'closed'>('waiting');
   const [connectionToast, setConnectionToast] = useState<string | null>(null);
@@ -266,6 +304,15 @@ export const LiveDisplayScreen: React.FC = () => {
           if (typeof msg.season === 'number') setSeason(msg.season);
           if (typeof msg.episode === 'number') setEpisode(msg.episode);
         }
+      } else if (msg.type === 'REQUEST_STATE') {
+        syncManager.broadcast({
+          type: 'ROOM_ANNOUNCE',
+          roomCode,
+        });
+        syncManager.broadcast({
+          type: 'TV_ACTIVE_CODE',
+          code: roomCode,
+        });
       } else if (msg.type === 'CLOSE_PLAYER') {
         setPlayingItem(null);
       } else if (msg.type === 'PLAYER_COMMAND') {

@@ -25,6 +25,8 @@ export type SyncMessage =
   | { type: 'CATEGORY_CHANGE'; category: CategoryType }
   | { type: 'SEARCH'; query: string }
   | { type: 'ROOM_UPDATE'; roomCode?: string; data?: any }
+  | { type: 'ROOM_ANNOUNCE'; roomCode: string }
+  | { type: 'TV_ACTIVE_CODE'; code: string }
   | { type: 'REQUEST_STATE' };
 
 const CHANNEL_NAME = 'cinema_live_display_sync_channel';
