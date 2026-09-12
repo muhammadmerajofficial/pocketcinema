@@ -13,6 +13,7 @@ import {
 import { 
   getFirestore, 
   initializeFirestore,
+  setLogLevel,
   doc, 
   setDoc, 
   getDoc, 
@@ -39,19 +40,23 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
+// Suppress transient backend connection retry warnings
+try {
+  setLogLevel('error');
+} catch (_) {}
+
 export const db = (() => {
+  const dbId = appletConfig.firestoreDatabaseId && appletConfig.firestoreDatabaseId !== "(default)"
+    ? appletConfig.firestoreDatabaseId
+    : undefined;
+
   try {
-    const dbId = appletConfig.firestoreDatabaseId && appletConfig.firestoreDatabaseId !== "(default)"
-      ? appletConfig.firestoreDatabaseId
-      : undefined;
     return initializeFirestore(app, {
       ignoreUndefinedProperties: true,
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
     }, dbId);
   } catch {
-    return appletConfig.firestoreDatabaseId && appletConfig.firestoreDatabaseId !== "(default)"
-      ? getFirestore(app, appletConfig.firestoreDatabaseId)
-      : getFirestore(app);
+    return dbId ? getFirestore(app, dbId) : getFirestore(app);
   }
 })();
 

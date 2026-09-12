@@ -21,7 +21,7 @@ import {
   Copy,
   Check
 } from 'lucide-react';
-import { CategoryType, MediaItem } from './types';
+import { CategoryType, MediaItem, AdvancedSearchFilters } from './types';
 import { MEDIA_COLLECTION } from './data/mediaData';
 import { loadCategoryMedia } from './services/api';
 import { RemoteTopNav } from './components/RemoteTopNav';
@@ -44,7 +44,8 @@ import {
   RoomData, 
   generate4DigitRoomCode,
   publishActiveTvRoom,
-  listenToActiveTvRoom
+  listenToActiveTvRoom,
+  getRemoteDeviceId
 } from './services/remotePairing';
 
 export default function App() {
@@ -114,6 +115,16 @@ export default function App() {
 
   const [activeCategory, setActiveCategory] = useState<CategoryType>('movies');
   const [searchQuery, setSearchQuery] = useState('');
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedSearchFilters>({
+    category: 'all',
+    country: '',
+    year: '',
+    genre: '',
+    language: '',
+  });
+  const advancedFiltersRef = useRef(advancedFilters);
+  advancedFiltersRef.current = advancedFilters;
+
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -229,6 +240,11 @@ export default function App() {
               });
             }
           }
+        } else {
+          setMainPageConnectFeedback({
+            success: false,
+            msg: res.message || 'TV Room not found.'
+          });
         }
       });
     }
@@ -324,6 +340,10 @@ export default function App() {
           });
         }
       } else if ((msg as any).type === 'ROOM_ANNOUNCE' && (msg as any).roomCode) {
+        // If this remote is ALREADY actively controlling a TV, ignore announcements!
+        if (pairingCodeRef.current && pairingCodeRef.current.length === 4) {
+          return;
+        }
         const code = String((msg as any).roomCode).trim().replace(/\D/g, '');
         if (code && code.length === 4) {
           setTvScreenCode(code);
@@ -332,11 +352,14 @@ export default function App() {
             localStorage.setItem('active_tv_screen_code', code);
           } catch (_) {}
         }
-      } else if ((msg as any).type === 'TV_ACTIVE_CODE' && (msg as any).code) {
-        const code = String((msg as any).code).trim().replace(/\D/g, '');
+      } else if ((msg as any).type === 'TV_ACTIVE_CODE') {
+        const activeMsg = msg as any;
+        const code = String(activeMsg.code || '').trim().replace(/\D/g, '');
         if (code && code.length === 4) {
           setTvScreenCode(code);
-          setMainPageCodeInput(code);
+          if (!pairingCodeRef.current) {
+            setMainPageCodeInput(code);
+          }
           try {
             localStorage.setItem('active_tv_screen_code', code);
           } catch (_) {}
@@ -348,7 +371,9 @@ export default function App() {
     const unsubFirestore = listenToActiveTvRoom((code) => {
       if (code && code.length === 4) {
         setTvScreenCode(code);
-        setMainPageCodeInput(code);
+        if (!pairingCodeRef.current) {
+          setMainPageCodeInput(code);
+        }
         try {
           localStorage.setItem('active_tv_screen_code', code);
         } catch (_) {}
@@ -357,21 +382,30 @@ export default function App() {
 
     // 2. Storage event listener (fires when other tabs change localStorage)
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'active_tv_screen_code' && e.newValue && e.newValue.trim().length === 4) {
-        const code = e.newValue.trim();
-        setTvScreenCode(code);
-        setMainPageCodeInput(code);
+      if (e.key === 'active_tv_screen_code') {
+        if (e.newValue && e.newValue.trim().length === 4) {
+          const code = e.newValue.trim();
+          setTvScreenCode(code);
+          if (!pairingCodeRef.current) {
+            setMainPageCodeInput(code);
+          }
+        }
       }
     };
     window.addEventListener('storage', handleStorage);
 
     // 3. Polling & Window Focus sync (ensures instantaneous sync upon switching back to tab)
     const syncFromStorage = () => {
+      if (pairingCodeRef.current && pairingCodeRef.current.length === 4) return;
       try {
         const saved = localStorage.getItem('active_tv_screen_code');
-        if (saved && saved.trim().length === 4 && saved.trim() !== tvScreenCodeRef.current) {
-          setTvScreenCode(saved.trim());
-          setMainPageCodeInput(saved.trim());
+        if (saved && saved.trim().length === 4) {
+          if (saved.trim() !== tvScreenCodeRef.current) {
+            setTvScreenCode(saved.trim());
+            if (!pairingCodeRef.current) {
+              setMainPageCodeInput(saved.trim());
+            }
+          }
         }
       } catch (_) {}
     };
@@ -425,7 +459,7 @@ export default function App() {
     });
 
     // 2. Firebase live dispatch to TV Display Room
-    const currentCode = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
+    const currentCode = pairingCodeRef.current;
     if (currentCode) {
       updateRoom(currentCode, {
         status: 'connected',
@@ -508,7 +542,7 @@ export default function App() {
         soundFx.playClick('switch');
         setMainPageConnectFeedback({
           success: false,
-          msg: res.message || 'Room not found. Check code on your TV.'
+          msg: res.message || 'TV Screen not found. Check code on your TV.'
         });
       }
     } catch (err: any) {
@@ -667,19 +701,33 @@ export default function App() {
 
   const hasMountedRef = useRef(false);
 
-  // Fetch initial media (Page 1) when Category or Search Query Changes
-  const fetchInitialMedia = useCallback(async (cat: CategoryType, query: string, shouldAutoPlay = false) => {
+  // Fetch initial media (Page 1) when Category, Search Query, or Advanced Filters Change
+  const fetchInitialMedia = useCallback(async (
+    cat: CategoryType, 
+    query: string, 
+    shouldAutoPlay = false,
+    filters?: AdvancedSearchFilters
+  ) => {
     setIsLoading(true);
     setPage(1);
     isFetchingRef.current = true;
     try {
-      const result = await loadCategoryMedia(cat, query, 1);
+      const activeFilters = filters || advancedFiltersRef.current;
+      const result = await loadCategoryMedia(cat, query, 1, activeFilters);
       setMediaItems(result.items);
       setHasMore(result.hasMore);
       setSelectedIndex(0);
 
-      // Update count for current category if no search query
-      if (!query.trim()) {
+      // Update count for current category if no search query and default filters
+      const hasCustomFilters = activeFilters && (
+        (activeFilters.category !== 'all' && activeFilters.category !== '') ||
+        Boolean(activeFilters.country) ||
+        Boolean(activeFilters.year) ||
+        Boolean(activeFilters.genre) ||
+        Boolean(activeFilters.language)
+      );
+
+      if (!query.trim() && !hasCustomFilters) {
         setCounts((prev) => ({
           ...prev,
           [cat]: result.items.length,
@@ -705,7 +753,7 @@ export default function App() {
     isFetchingRef.current = true;
     const nextPage = page + 1;
     try {
-      const result = await loadCategoryMedia(activeCategory, searchQuery, nextPage);
+      const result = await loadCategoryMedia(activeCategory, searchQuery, nextPage, advancedFiltersRef.current);
       if (result.items.length === 0) {
         setHasMore(false);
       } else {
@@ -721,7 +769,7 @@ export default function App() {
     }
   }, [activeCategory, searchQuery, page, hasMore, isLoadingMore]);
 
-  // Load initial content on mount & handle category/search changes
+  // Load initial content on mount & handle category/search/filters changes
   useEffect(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -729,17 +777,19 @@ export default function App() {
 
     if (searchQuery) {
       debounceTimerRef.current = setTimeout(() => {
-        fetchInitialMedia(activeCategory, searchQuery, false);
+        fetchInitialMedia(activeCategory, searchQuery, false, advancedFilters);
       }, 350);
     } else {
       autoPlayCategoryChangeRef.current = false;
-      fetchInitialMedia(activeCategory, '', false);
+      debounceTimerRef.current = setTimeout(() => {
+        fetchInitialMedia(activeCategory, '', false, advancedFilters);
+      }, 40);
     }
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [activeCategory, searchQuery, fetchInitialMedia]);
+  }, [activeCategory, searchQuery, advancedFilters, fetchInitialMedia]);
 
   // IntersectionObserver for seamless infinite scrolling
   const loadMoreAnchorRef = useCallback(
@@ -866,30 +916,32 @@ export default function App() {
           {/* Header Controls: TV Code Display + Room Code Input + Active Button + Camera QR + TV Player + Sound */}
           <div className="flex items-center gap-1.5 sm:gap-2">
             {/* TV Screen Code Box / Button directly BEFORE the code input box */}
-            <button
-              id="header-tv-screen-code-btn"
-              type="button"
-              onClick={handleTvCodeBoxClick}
-              className={`group flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all cursor-pointer shadow-sm focus:outline-none ${
-                pairingCode && pairingCode === tvScreenCode
-                  ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400 hover:bg-emerald-900/60 shadow-emerald-950/50 ring-1 ring-emerald-500/30'
-                  : 'bg-zinc-900/95 hover:bg-zinc-800 border-amber-500/40 hover:border-amber-400 text-amber-400 hover:text-amber-300'
-              }`}
-              title={`TV Screen Code: #${tvScreenCode} (Matches TV Screen • Click to auto-fill & activate)`}
-            >
-              <Tv2 className={`w-3.5 h-3.5 shrink-0 ${pairingCode && pairingCode === tvScreenCode ? 'text-emerald-400' : 'text-amber-400 group-hover:scale-110 transition-transform'}`} />
-              <span className="text-[10px] uppercase font-sans font-semibold text-zinc-400 hidden xs:inline">TV:</span>
-              <span className="font-black tracking-wider text-xs sm:text-sm">
-                #{tvScreenCode}
-              </span>
-              {pairingCode && pairingCode === tvScreenCode ? (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse shrink-0" title="Connected & Active" />
-              ) : copiedTvCode ? (
-                <Check className="w-3 h-3 text-emerald-400 shrink-0" title="Copied & Activated" />
-              ) : (
-                <Copy className="w-3 h-3 text-zinc-500 group-hover:text-amber-300 transition-colors shrink-0" title="Click to auto-fill & activate" />
-              )}
-            </button>
+            {tvScreenCode ? (
+              <button
+                id="header-tv-screen-code-btn"
+                type="button"
+                onClick={handleTvCodeBoxClick}
+                className={`group flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all cursor-pointer shadow-sm focus:outline-none ${
+                  pairingCode && pairingCode === tvScreenCode
+                    ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400 hover:bg-emerald-900/60 shadow-emerald-950/50 ring-1 ring-emerald-500/30'
+                    : 'bg-zinc-900/95 hover:bg-zinc-800 border-amber-500/40 hover:border-amber-400 text-amber-400 hover:text-amber-300'
+                }`}
+                title={`TV Screen Code: #${tvScreenCode} (Matches TV Screen • Click to auto-fill & activate)`}
+              >
+                <Tv2 className={`w-3.5 h-3.5 shrink-0 ${pairingCode && pairingCode === tvScreenCode ? 'text-emerald-400' : 'text-amber-400 group-hover:scale-110 transition-transform'}`} />
+                <span className="text-[10px] uppercase font-sans font-semibold text-zinc-400 hidden xs:inline">TV:</span>
+                <span className="font-black tracking-wider text-xs sm:text-sm">
+                  #{tvScreenCode}
+                </span>
+                {pairingCode && pairingCode === tvScreenCode ? (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse shrink-0" title="Connected & Active" />
+                ) : copiedTvCode ? (
+                  <Check className="w-3 h-3 text-emerald-400 shrink-0" title="Copied & Activated" />
+                ) : (
+                  <Copy className="w-3 h-3 text-zinc-500 group-hover:text-amber-300 transition-colors shrink-0" title="Click to auto-fill & activate" />
+                )}
+              </button>
+            ) : null}
 
             {/* Room code input box & active button directly before camera icon */}
             <form onSubmit={handleMainPageConnect} className="flex items-center gap-1 sm:gap-1.5">
@@ -957,20 +1009,19 @@ export default function App() {
                 e.preventDefault();
                 soundFx.playClick('ok');
                 const freshCode = generate4DigitRoomCode();
-                setTvScreenCode(freshCode);
-                setMainPageCodeInput(freshCode);
-                try {
-                  localStorage.setItem('active_tv_screen_code', freshCode);
-                } catch (_) {}
+                
+                // Only populate code into remote if remote is not already paired to an active TV
+                if (!pairingCodeRef.current) {
+                  setTvScreenCode(freshCode);
+                  setMainPageCodeInput(freshCode);
+                  try {
+                    localStorage.setItem('active_tv_screen_code', freshCode);
+                  } catch (_) {}
+                }
                 publishActiveTvRoom(freshCode);
 
                 const targetUrl = getTvDisplayUrlWithCode(freshCode);
                 window.open(targetUrl, '_blank', 'noopener,noreferrer');
-
-                const target = playingMediaRef.current || (mediaItems.length > 0 ? mediaItems[selectedIndex] : null);
-                if (target) {
-                  handlePlayMedia(target, playerSeason, playerEpisode);
-                }
               }}
               className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
               title="Open TV Screen in a new tab"
@@ -1017,15 +1068,18 @@ export default function App() {
             soundFx.playClick('switch');
             autoPlayCategoryChangeRef.current = true;
             if (cat === activeCategory) {
-              fetchInitialMedia(cat, '', true);
+              fetchInitialMedia(cat, searchQuery, true, advancedFilters);
             } else {
               setActiveCategory(cat);
               setSearchQuery('');
+              if (advancedFilters.category !== 'all' && advancedFilters.category !== cat) {
+                setAdvancedFilters((prev) => ({ ...prev, category: 'all' }));
+              }
             }
           }}
         />
 
-        {/* Search Bar with voice search */}
+        {/* Search Bar with voice search and advanced search system */}
         <RemoteSearchBar
           searchQuery={searchQuery}
           onSearchChange={(query) => {
@@ -1036,7 +1090,16 @@ export default function App() {
             if (isScreenLocked) return;
             setSearchQuery('');
           }}
+          activeCategory={activeCategory}
           disabled={isScreenLocked}
+          filters={advancedFilters}
+          onFiltersChange={(newFilters) => {
+            if (isScreenLocked) return;
+            setAdvancedFilters(newFilters);
+            if (newFilters.category !== 'all' && newFilters.category !== '') {
+              setActiveCategory(newFilters.category);
+            }
+          }}
         />
 
         {/* Media Posters Catalog in Chronological Timeline */}

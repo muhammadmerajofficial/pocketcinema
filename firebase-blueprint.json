@@ -127,6 +127,54 @@
         }
       },
       "required": ["code", "userId", "userEmail"]
+    },
+    "Room": {
+      "title": "TV Player Room",
+      "description": "Direct 4-digit room channel for TV player and remote control pairing",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "description": "4-digit numeric room code"
+        },
+        "status": {
+          "type": "string",
+          "description": "Room status: waiting, connected, or closed"
+        },
+        "action": {
+          "type": "string",
+          "description": "Last playback action command"
+        },
+        "isPlaying": {
+          "type": "boolean",
+          "description": "Current play/pause state"
+        },
+        "currentTime": {
+          "type": "number",
+          "description": "Current playback position in seconds"
+        },
+        "volume": {
+          "type": "number",
+          "description": "Current volume level"
+        },
+        "serverIndex": {
+          "type": "number",
+          "description": "Active video stream server index"
+        },
+        "season": {
+          "type": "number",
+          "description": "Active season number"
+        },
+        "episode": {
+          "type": "number",
+          "description": "Active episode number"
+        },
+        "lastCommandTimestamp": {
+          "type": "number",
+          "description": "Timestamp of latest command"
+        }
+      },
+      "required": ["roomCode", "status"]
     }
   },
   "firestore": {
@@ -137,6 +185,10 @@
     "/remote_sessions/{sessionCode}": {
       "schema": "RemoteSession",
       "description": "Live remote sync session pairing document keyed by 6-digit code"
+    },
+    "/rooms/{roomCode}": {
+      "schema": "Room",
+      "description": "Direct 4-digit room channel for TV player and remote control pairing"
     }
   }
 }

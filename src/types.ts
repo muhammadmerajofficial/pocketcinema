@@ -1,5 +1,13 @@
 export type CategoryType = 'movies' | 'tv' | 'anime';
 
+export interface AdvancedSearchFilters {
+  category: 'all' | CategoryType;
+  country: string; // Country code e.g. 'US', 'IN', 'JP', 'KR', 'GB', 'BD', or ''
+  year: string; // Specific year e.g. '2024' or range '2020-2025' or 'classic' or ''
+  genre: string; // Genre name e.g. 'Action', 'Sci-Fi', or ''
+  language: string; // Language code e.g. 'en', 'bn', 'hi', 'ja', 'ko', or ''
+}
+
 export interface MediaItem {
   id: string;
   title: string;
@@ -17,6 +25,8 @@ export interface MediaItem {
   ageRating: string; // "PG-13", "TV-MA", "16+"
   cast?: string[];
   timelineEra: string; // e.g., "2024 - 2025 (Latest Releases)", "2020 - 2023 (Modern Era)", "2010 - 2019 (Golden Blockbusters)", "Classic Masterpieces"
+  originalLanguage?: string;
+  originCountry?: string[];
 }
 
 export type RemoteButtonType = 'up' | 'down' | 'prev' | 'next' | 'ok';

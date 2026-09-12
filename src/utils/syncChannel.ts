@@ -21,7 +21,7 @@ export type SyncMessage =
   | { type: 'PLAYER_COMMAND'; command: 'play' | 'pause' | 'seek' | 'rewind' | 'forward' | 'mute' | 'unmute' | 'volume' | 'fullscreen' | 'prev_ep' | 'next_ep' | 'stop'; value?: any; extra?: any; timestamp: number }
   | { type: 'PLAYER_STATUS'; isPlaying: boolean; currentTime: number; duration: number; volume: number; isMuted: boolean; activeSeason?: number; activeEpisode?: number; timestamp: number }
   | { type: 'CLOSE_PLAYER' }
-  | { type: 'DISCONNECT'; timestamp?: number }
+  | { type: 'DISCONNECT'; roomCode?: string; timestamp?: number }
   | { type: 'CATEGORY_CHANGE'; category: CategoryType }
   | { type: 'SEARCH'; query: string }
   | { type: 'ROOM_UPDATE'; roomCode?: string; data?: any }

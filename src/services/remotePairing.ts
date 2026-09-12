@@ -19,8 +19,13 @@ export interface RoomData {
   currentTime: number;
   duration?: number;
   action: 'none' | 'play' | 'pause' | 'close' | 'rewind' | 'forward' | 'seek';
-  volume: number; // 0 to 1
+  volume: number; // 0 to 100
   status: 'waiting' | 'connected' | 'closed';
+  controllerId?: string | null;
+  controllerName?: string | null;
+  connectedAt?: number | null;
+  lastHeartbeat?: number | null;
+  senderRemoteId?: string | null;
   playingItem?: MediaItem | null;
   serverIndex?: number;
   season?: number;
@@ -28,6 +33,44 @@ export interface RoomData {
   lastCommandTimestamp?: number;
   updatedAt?: any;
   createdAt?: any;
+  closedAt?: any;
+}
+
+let cachedDeviceId: string | null = null;
+
+/**
+ * Persistent unique device ID for this remote controller (unique per browser / phone / tab)
+ */
+export function getRemoteDeviceId(): string {
+  if (cachedDeviceId) return cachedDeviceId;
+  try {
+    const key = 'cinematic_remote_device_id';
+    let id: string | null = null;
+    try {
+      id = localStorage.getItem(key);
+    } catch (_) {}
+    if (!id) {
+      try {
+        id = sessionStorage.getItem(key);
+      } catch (_) {}
+    }
+    if (!id) {
+      id = `rem_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`;
+      try {
+        localStorage.setItem(key, id);
+      } catch (_) {}
+      try {
+        sessionStorage.setItem(key, id);
+      } catch (_) {}
+    }
+    cachedDeviceId = id;
+    return id;
+  } catch {
+    if (!cachedDeviceId) {
+      cachedDeviceId = `rem_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`;
+    }
+    return cachedDeviceId;
+  }
 }
 
 /**
@@ -41,39 +84,29 @@ export function generate4DigitRoomCode(): string {
  * Initialize a new TV Player room in Firebase at rooms/{roomCode}
  */
 export async function initRoom(roomCode: string, initialData: Partial<RoomData> = {}): Promise<RoomData> {
-  const cleanCode = roomCode.trim();
+  const cleanCode = roomCode.trim().replace(/\D/g, '');
   const roomRef = doc(db, 'rooms', cleanCode);
-
-  let initialStatus: 'waiting' | 'connected' | 'closed' = 'waiting';
-  try {
-    const snap = await getDoc(roomRef);
-    if (snap.exists()) {
-      const ex = snap.data() as RoomData;
-      if (ex.status === 'connected') {
-        initialStatus = 'connected';
-      }
-    }
-  } catch (_) {}
 
   const data: RoomData = {
     roomCode: cleanCode,
-    isPlaying: false,
+    isPlaying: true,
     currentTime: 0,
     action: 'none',
-    volume: 1,
-    status: initialStatus,
+    volume: 100,
+    status: 'waiting',
+    controllerId: null,
+    controllerName: null,
     playingItem: null,
     serverIndex: 0,
     season: 1,
     episode: 1,
     ...initialData,
-    ...(initialStatus === 'connected' ? { status: 'connected' } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
 
   try {
-    await setDoc(roomRef, sanitizeFirestoreData(data), { merge: true });
+    await setDoc(roomRef, sanitizeFirestoreData(data));
   } catch (e) {
     console.warn('[initRoom] Firestore error, local fallback active:', e);
   }
@@ -88,83 +121,76 @@ export async function initRoom(roomCode: string, initialData: Partial<RoomData> 
 }
 
 /**
- * Connect remote to an existing room with 4-digit code
+ * Connect remote to an existing room with 4-digit code.
  */
-export async function connectToRoom(roomCode: string): Promise<{ success: boolean; data?: RoomData; message: string }> {
+export async function connectToRoom(
+  roomCode: string,
+  customRemoteId?: string
+): Promise<{ 
+  success: boolean; 
+  data?: RoomData; 
+  message: string; 
+}> {
   const cleanCode = roomCode.trim().replace(/\D/g, '');
   if (cleanCode.length !== 4) {
     return { success: false, message: 'Room code must be a 4-digit number (e.g. 4829).' };
   }
+
+  const myRemoteId = customRemoteId || getRemoteDeviceId();
 
   try {
     const roomRef = doc(db, 'rooms', cleanCode);
     const snap = await getDoc(roomRef);
 
     if (!snap.exists()) {
-      // Room pre-activated by remote: write room data so TV connects immediately upon opening
-      const newRoomData: RoomData = {
-        roomCode: cleanCode,
-        status: 'connected',
-        action: 'play',
-        isPlaying: true,
-        currentTime: 0,
-        volume: 100,
-        serverIndex: 0,
-        season: 1,
-        episode: 1,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      await setDoc(roomRef, sanitizeFirestoreData(newRoomData));
-
-      try {
-        localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
-        localStorage.setItem('active_tv_screen_code', cleanCode);
-      } catch (_) {}
-
-      syncManager.broadcast({
-        type: 'ROOM_UPDATE',
-        roomCode: cleanCode,
-        data: { status: 'connected', action: 'play', isPlaying: true, volume: 100 }
-      } as any);
-
-      return { 
-        success: true, 
-        data: newRoomData, 
-        message: `Connected & activated TV Room #${cleanCode}!` 
+      return {
+        success: false,
+        message: `TV Screen #${cleanCode} not found. Please open TV Screen first to view its active code.`
       };
     }
 
     const existingData = snap.data() as RoomData;
+
     if (existingData.status === 'closed') {
       return {
         success: false,
-        message: `Room #${cleanCode} was closed. Please open TV Screen to get a new active room code.`
+        message: `TV Screen #${cleanCode} was closed. Please open TV Screen to get a new active room code.`
       };
     }
 
-    await setDoc(roomRef, {
+    const controllerName = typeof navigator !== 'undefined' && /iPhone|Android|Mobile/i.test(navigator.userAgent)
+      ? 'Mobile Remote'
+      : 'Cinema Remote';
+
+    const updatedData: Partial<RoomData> = {
       status: 'connected',
-      action: 'play',
+      controllerId: myRemoteId,
+      controllerName,
+      connectedAt: Date.now(),
+      lastHeartbeat: Date.now(),
       isPlaying: true,
+      action: 'play',
       volume: 100,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    };
+
+    await setDoc(roomRef, sanitizeFirestoreData(updatedData), { merge: true });
 
     try {
       localStorage.setItem(LOCAL_ROOM_CODE_KEY, cleanCode);
       localStorage.setItem('active_tv_screen_code', cleanCode);
+      localStorage.setItem('cinematic_remote_room_code', cleanCode);
     } catch (_) {}
 
     syncManager.broadcast({
       type: 'ROOM_UPDATE',
       roomCode: cleanCode,
-      data: { status: 'connected', action: 'play', isPlaying: true, volume: 100 }
+      data: updatedData
     } as any);
 
     return { 
       success: true, 
-      data: { ...existingData, status: 'connected', action: 'play', isPlaying: true, volume: 100 }, 
+      data: { ...existingData, ...updatedData, roomCode: cleanCode }, 
       message: `Connected to TV Room #${cleanCode}` 
     };
   } catch (err: any) {
@@ -177,13 +203,15 @@ export async function connectToRoom(roomCode: string): Promise<{ success: boolea
 }
 
 /**
- * Update room state in Firebase
+ * Update room state in Firebase with senderRemoteId
  */
 export async function updateRoom(roomCode: string, data: Partial<RoomData>): Promise<void> {
   if (!roomCode) return;
-  const cleanCode = roomCode.trim();
+  const cleanCode = roomCode.trim().replace(/\D/g, '');
+  const myRemoteId = getRemoteDeviceId();
   const sanitized = sanitizeFirestoreData({
     ...data,
+    senderRemoteId: myRemoteId,
     updatedAt: serverTimestamp(),
   });
 
@@ -198,7 +226,7 @@ export async function updateRoom(roomCode: string, data: Partial<RoomData>): Pro
   syncManager.broadcast({
     type: 'ROOM_UPDATE',
     roomCode: cleanCode,
-    data
+    data: { ...data, senderRemoteId: myRemoteId }
   } as any);
 }
 
@@ -207,7 +235,7 @@ export async function updateRoom(roomCode: string, data: Partial<RoomData>): Pro
  */
 export function listenToRoom(roomCode: string, onUpdate: (data: RoomData | null) => void): () => void {
   if (!roomCode) return () => {};
-  const cleanCode = roomCode.trim();
+  const cleanCode = roomCode.trim().replace(/\D/g, '');
   const roomRef = doc(db, 'rooms', cleanCode);
 
   const unsubscribe = onSnapshot(
@@ -228,11 +256,14 @@ export function listenToRoom(roomCode: string, onUpdate: (data: RoomData | null)
 }
 
 /**
- * Close and clean up room session
+ * Close and clean up room session.
+ * Instantly notifies and disconnects the paired remote controller.
  */
 export async function closeRoom(roomCode: string): Promise<void> {
   if (!roomCode) return;
   const cleanCode = roomCode.trim().replace(/\D/g, '');
+  if (!cleanCode) return;
+
   try {
     const roomRef = doc(db, 'rooms', cleanCode);
     await setDoc(roomRef, {
@@ -240,6 +271,8 @@ export async function closeRoom(roomCode: string): Promise<void> {
       action: 'close',
       isPlaying: false,
       playingItem: null,
+      controllerId: null,
+      closedAt: Date.now(),
       updatedAt: serverTimestamp(),
     }, { merge: true });
   } catch (err) {
@@ -247,23 +280,42 @@ export async function closeRoom(roomCode: string): Promise<void> {
   }
 
   try {
+    const activeRef = doc(db, 'rooms', '_active_tv');
+    await setDoc(activeRef, {
+      roomCode: '',
+      status: 'closed',
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (_) {}
+
+  try {
     localStorage.removeItem(LOCAL_ROOM_CODE_KEY);
+    localStorage.removeItem('active_tv_screen_code');
+    localStorage.removeItem('cinematic_remote_room_code');
   } catch (_) {}
 
   // Broadcast immediate disconnection to all remote tabs and sync listeners
   syncManager.broadcast({
     type: 'ROOM_UPDATE',
     roomCode: cleanCode,
-    data: { status: 'closed', action: 'close', isPlaying: false, playingItem: null }
+    data: { status: 'closed', action: 'close', isPlaying: false, playingItem: null, controllerId: null }
   } as any);
   syncManager.broadcast({
     type: 'DISCONNECT',
+    roomCode: cleanCode,
     timestamp: Date.now()
   });
+
+  // Remove from localStorage if it matches
+  try {
+    if (localStorage.getItem('active_tv_screen_code') === cleanCode) {
+      localStorage.removeItem('active_tv_screen_code');
+    }
+  } catch (_) {}
 }
 
 /**
- * Broadcast and persist the currently active TV screen room code so all remotes/main pages get it instantly
+ * Broadcast and persist the currently active TV screen room code
  */
 export async function publishActiveTvRoom(roomCode: string): Promise<void> {
   if (!roomCode) return;

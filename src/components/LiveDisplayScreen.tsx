@@ -19,8 +19,11 @@ import {
   RotateCw,
   Volume1,
   Volume2,
-  VolumeX
+  VolumeX,
+  Power
 } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import QRCode from 'qrcode';
 import { MediaItem } from '../types';
 import { MEDIA_COLLECTION } from '../data/mediaData';
@@ -51,9 +54,8 @@ export const LiveDisplayScreen: React.FC = () => {
   const [isQROverlayOpen, setIsQROverlayOpen] = useState(true);
 
   // 1. Determine 4-digit roomCode:
-  // If explicitly provided via URL (?room=XXXX or ?code=XXXX), use that.
-  // Otherwise, generate a fresh, new, unique 4-digit roomCode every time TV Screen opens
-  const [roomCode] = useState<string>(() => {
+  // Every time TV Screen opens anew, generate a fresh unique 4-digit code.
+  const [roomCode, setRoomCode] = useState<string>(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const fromUrl = urlParams.get('room') || urlParams.get('code');
@@ -72,6 +74,36 @@ export const LiveDisplayScreen: React.FC = () => {
     return fresh;
   });
 
+  const activeControllerIdRef = useRef<string | null>(null);
+
+  // If initial roomCode in URL was previously marked closed, immediately generate a fresh room code!
+  useEffect(() => {
+    let isCancelled = false;
+    const cleanCode = roomCode.trim().replace(/\D/g, '');
+    const checkDoc = async () => {
+      try {
+        const roomRef = doc(db, 'rooms', cleanCode);
+        const snap = await getDoc(roomRef);
+        if (snap.exists() && snap.data()?.status === 'closed') {
+          const fresh = generate4DigitRoomCode();
+          if (!isCancelled) {
+            setRoomCode(fresh);
+            try {
+              localStorage.setItem('active_tv_screen_code', fresh);
+              const u = new URL(window.location.href);
+              u.searchParams.set('room', fresh);
+              window.history.replaceState({}, '', u.toString());
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    };
+    checkDoc();
+    return () => { isCancelled = true; };
+  }, []);
+
+  const [roomStatus, setRoomStatus] = useState<'waiting' | 'connected' | 'closed'>('waiting');
+
   // Broadcast and publish TV Screen room code immediately to Firestore, BroadcastChannel, and localStorage
   useEffect(() => {
     if (!roomCode) return;
@@ -82,7 +114,9 @@ export const LiveDisplayScreen: React.FC = () => {
     const t1 = setTimeout(() => publishActiveTvRoom(roomCode), 150);
     const t2 = setTimeout(() => publishActiveTvRoom(roomCode), 500);
     const t3 = setTimeout(() => publishActiveTvRoom(roomCode), 1200);
-    const t4 = setInterval(() => publishActiveTvRoom(roomCode), 3500);
+    const t4 = setInterval(() => {
+      publishActiveTvRoom(roomCode);
+    }, 3500);
 
     return () => {
       clearTimeout(t1);
@@ -92,7 +126,6 @@ export const LiveDisplayScreen: React.FC = () => {
     };
   }, [roomCode]);
 
-  const [roomStatus, setRoomStatus] = useState<'waiting' | 'connected' | 'closed'>('waiting');
   const [connectionToast, setConnectionToast] = useState<string | null>(null);
   // Initially auto-play default movie or media from URL params with full sound
   const [playingItem, setPlayingItem] = useState<MediaItem | null>(() => {
@@ -252,6 +285,9 @@ export const LiveDisplayScreen: React.FC = () => {
       // When remote connects (QR code scanned or 4-digit room code entered in remote and activated)
       if (data.status === 'connected') {
         setRoomStatus('connected');
+        if (data.controllerId) {
+          activeControllerIdRef.current = data.controllerId;
+        }
         
         // Hide big QR & Room ID from the screen ONLY when remote actually connects!
         setIsQROverlayOpen(false);
@@ -273,6 +309,7 @@ export const LiveDisplayScreen: React.FC = () => {
         setVolume(100);
       } else if (data.status === 'waiting') {
         setRoomStatus('waiting');
+        activeControllerIdRef.current = null;
         // STRICT: Stay open and never auto-hide until remote activates the room code
         setIsQROverlayOpen(true);
       }
@@ -472,10 +509,28 @@ export const LiveDisplayScreen: React.FC = () => {
   };
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(roomCode);
+    try {
+      navigator.clipboard.writeText(roomCode);
+    } catch (_) {}
     setCopiedCode(true);
     soundFx.playClick('switch');
     setTimeout(() => setCopiedCode(false), 2000);
+  };
+
+  const handleCloseTV = () => {
+    soundFx.playClick('switch');
+    closeRoom(roomCode);
+    setRoomStatus('closed');
+    try {
+      window.close();
+    } catch (_) {}
+    setTimeout(() => {
+      const u = new URL(window.location.href);
+      u.searchParams.delete('view');
+      u.searchParams.delete('room');
+      u.searchParams.delete('code');
+      window.location.href = u.toString() || '/';
+    }, 150);
   };
 
   const isConnected = roomStatus === 'connected';
@@ -590,6 +645,18 @@ export const LiveDisplayScreen: React.FC = () => {
               <QrCode className="w-3.5 h-3.5 text-amber-400" />
             </button>
           )}
+
+          {/* Close TV Screen Button (Instantly disconnects paired remote) */}
+          <button
+            type="button"
+            onClick={handleCloseTV}
+            tabIndex={0}
+            className="interactive-element flex items-center gap-1 px-2 py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-300 hover:text-white transition-colors cursor-pointer focus:outline-none"
+            title="Close TV Screen (Disconnects active remote)"
+          >
+            <Power className="w-3.5 h-3.5 text-red-400" />
+            <span className="text-[10px] font-bold hidden sm:inline">Close</span>
+          </button>
         </div>
       </div>
 
@@ -624,9 +691,20 @@ export const LiveDisplayScreen: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-900/90 border border-zinc-800 text-xs font-mono text-zinc-300 shadow-inner">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-              <span className="text-amber-300 font-semibold">Waiting for Remote</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-900/90 border border-zinc-800 text-xs font-mono text-zinc-300 shadow-inner">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                <span className="text-amber-300 font-semibold">Waiting for Remote</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseTV}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-300 hover:text-white text-xs font-bold transition-all cursor-pointer shadow-md"
+                title="Close TV Screen (Disconnects active remote)"
+              >
+                <Power className="w-3.5 h-3.5 text-red-400" />
+                <span>Close TV</span>
+              </button>
             </div>
           </header>
 
@@ -712,6 +790,14 @@ export const LiveDisplayScreen: React.FC = () => {
                   <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-mono font-bold text-xs flex items-center justify-center shrink-0">3</span>
                   <span>This pairing screen will automatically hide and stream full-screen!</span>
                 </div>
+              </div>
+
+              {/* Exclusive Control Notice */}
+              <div className="w-full p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2 mb-4">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 mt-1" />
+                <span>
+                  <strong>Exclusive TV Control:</strong> The first user to activate gains sole control. Other users entering this code will see <em>Already active</em> and cannot control this TV. Closing this TV screen instantly disconnects the remote.
+                </span>
               </div>
 
               {/* Background Audio / Now Playing Indicator */}

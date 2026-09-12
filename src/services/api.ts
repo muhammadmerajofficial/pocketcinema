@@ -1,4 +1,4 @@
-import { CategoryType, MediaItem } from '../types';
+import { CategoryType, MediaItem, AdvancedSearchFilters } from '../types';
 import { MEDIA_COLLECTION } from '../data/mediaData';
 
 // Get API config from index.html window.CINEMATIC_CONFIG with direct fallbacks
@@ -23,7 +23,7 @@ const TMDB_IMAGE_BASE = config.TMDB_IMAGE_BASE;
 const ANILIST_GRAPHQL_URL = config.ANILIST_GRAPHQL_URL;
 
 // TMDB Genre Maps
-const MOVIE_GENRES: Record<number, string> = {
+export const MOVIE_GENRES: Record<number, string> = {
   28: 'Action',
   12: 'Adventure',
   16: 'Animation',
@@ -45,7 +45,7 @@ const MOVIE_GENRES: Record<number, string> = {
   37: 'Western',
 };
 
-const TV_GENRES: Record<number, string> = {
+export const TV_GENRES: Record<number, string> = {
   10759: 'Action & Adventure',
   16: 'Animation',
   35: 'Comedy',
@@ -62,6 +62,44 @@ const TV_GENRES: Record<number, string> = {
   10767: 'Talk',
   10768: 'War & Politics',
   37: 'Western',
+};
+
+export const GENRE_NAME_TO_MOVIE_ID: Record<string, number> = {
+  Action: 28,
+  Adventure: 12,
+  Animation: 16,
+  Comedy: 35,
+  Crime: 80,
+  Documentary: 99,
+  Drama: 18,
+  Family: 10751,
+  Fantasy: 14,
+  History: 36,
+  Horror: 27,
+  Music: 10402,
+  Mystery: 9648,
+  Romance: 10749,
+  'Sci-Fi': 878,
+  Thriller: 53,
+  War: 10752,
+  Western: 37,
+};
+
+export const GENRE_NAME_TO_TV_ID: Record<string, number> = {
+  Action: 10759,
+  Adventure: 10759,
+  Animation: 16,
+  Comedy: 35,
+  Crime: 80,
+  Documentary: 99,
+  Drama: 18,
+  Family: 10751,
+  Fantasy: 10765,
+  Mystery: 9648,
+  Romance: 18,
+  'Sci-Fi': 10765,
+  War: 10768,
+  Western: 37,
 };
 
 // Clean HTML tags from AniList descriptions
@@ -96,6 +134,8 @@ interface TmdbMovieResult {
   vote_average: number;
   genre_ids?: number[];
   adult?: boolean;
+  original_language?: string;
+  origin_country?: string[];
 }
 
 interface TmdbTvResult {
@@ -163,6 +203,11 @@ function transformTmdbMovie(m: TmdbMovieResult): MediaItem {
     ? `${TMDB_IMAGE_BASE}/w1280${m.backdrop_path}`
     : poster;
 
+  const origLang = m.original_language || 'en';
+  const origCountries = m.origin_country && m.origin_country.length > 0 
+    ? m.origin_country 
+    : (origLang === 'en' ? ['US'] : origLang === 'ja' ? ['JP'] : origLang === 'ko' ? ['KR'] : origLang === 'hi' ? ['IN'] : origLang === 'bn' ? ['BD'] : ['US']);
+
   return {
     id: `tmdb-m-${m.id}`,
     title: m.title || m.original_title || 'Untitled Movie',
@@ -178,6 +223,8 @@ function transformTmdbMovie(m: TmdbMovieResult): MediaItem {
     synopsis: m.overview || 'No synopsis provided.',
     ageRating: m.adult ? 'R' : 'PG-13',
     timelineEra: getTimelineEra(year),
+    originalLanguage: origLang,
+    originCountry: origCountries,
   };
 }
 
@@ -196,6 +243,11 @@ function transformTmdbTv(tv: TmdbTvResult): MediaItem {
     ? `${TMDB_IMAGE_BASE}/w1280${tv.backdrop_path}`
     : poster;
 
+  const origLang = tv.original_language || 'en';
+  const origCountries = tv.origin_country && tv.origin_country.length > 0 
+    ? tv.origin_country 
+    : (origLang === 'en' ? ['US'] : origLang === 'ja' ? ['JP'] : origLang === 'ko' ? ['KR'] : origLang === 'hi' ? ['IN'] : origLang === 'bn' ? ['BD'] : ['US']);
+
   return {
     id: `tmdb-tv-${tv.id}`,
     title: tv.name || tv.original_name || 'Untitled Series',
@@ -211,6 +263,8 @@ function transformTmdbTv(tv: TmdbTvResult): MediaItem {
     synopsis: tv.overview || 'No synopsis provided.',
     ageRating: 'TV-14',
     timelineEra: getTimelineEra(year),
+    originalLanguage: origLang,
+    originCountry: origCountries,
   };
 }
 
@@ -238,6 +292,8 @@ function transformAniListAnime(a: AniListMedia): MediaItem {
     synopsis: cleanHtml(a.description),
     ageRating: a.isAdult ? '18+' : '14+',
     timelineEra: getTimelineEra(year),
+    originalLanguage: 'ja',
+    originCountry: ['JP'],
   };
 }
 
@@ -275,26 +331,146 @@ function transformTmdbAnime(tv: TmdbTvResult): MediaItem {
     synopsis: tv.overview || 'No synopsis provided.',
     ageRating: 'TV-14',
     timelineEra: getTimelineEra(year),
+    originalLanguage: tv.original_language || 'ja',
+    originCountry: tv.origin_country && tv.origin_country.length > 0 ? tv.origin_country : ['JP'],
   };
 }
 
+/**
+ * Filter helper that validates MediaItem against Category, Country, Year, Genre, Language
+ */
+export function matchesAdvancedFilters(item: MediaItem, filters?: AdvancedSearchFilters): boolean {
+  if (!filters) return true;
+
+  // 1. Category filter
+  if (filters.category && filters.category !== 'all' && item.category !== filters.category) {
+    return false;
+  }
+
+  // 2. Country filter (e.g. US, IN, JP, KR, GB, BD, FR, ES, etc.)
+  if (filters.country) {
+    const targetCountry = filters.country.toUpperCase();
+    const itemCountries = (item.originCountry || []).map((c) => c.toUpperCase());
+    const matchesCountry = itemCountries.includes(targetCountry);
+    if (!matchesCountry) {
+      if (targetCountry === 'US' && item.originalLanguage === 'en') {
+        // match
+      } else if (targetCountry === 'JP' && (item.originalLanguage === 'ja' || item.category === 'anime')) {
+        // match
+      } else if (targetCountry === 'KR' && item.originalLanguage === 'ko') {
+        // match
+      } else if (targetCountry === 'IN' && (item.originalLanguage === 'hi' || item.originalLanguage === 'te' || item.originalLanguage === 'ta')) {
+        // match
+      } else if (targetCountry === 'BD' && item.originalLanguage === 'bn') {
+        // match
+      } else if (targetCountry === 'GB' && item.originalLanguage === 'en' && item.directorOrStudio.toLowerCase().includes('bbc')) {
+        // match
+      } else {
+        return false;
+      }
+    }
+  }
+
+  // 3. Year filter (custom numeric input like 1999)
+  if (filters.year && filters.year.trim()) {
+    const y = item.year;
+    const trimmedYear = filters.year.trim();
+    if (/^\d{4}$/.test(trimmedYear)) {
+      const numYear = parseInt(trimmedYear, 10);
+      if (!isNaN(numYear) && y !== numYear) return false;
+    } else if (/^\d{1,3}$/.test(trimmedYear)) {
+      // While typing, ensure prefix matches
+      if (!String(y).startsWith(trimmedYear)) return false;
+    }
+  }
+
+  // 4. Genre filter
+  if (filters.genre) {
+    const targetGenre = filters.genre.toLowerCase();
+    const hasGenre = item.genres.some((g) => g.toLowerCase().includes(targetGenre) || targetGenre.includes(g.toLowerCase()));
+    if (!hasGenre) return false;
+  }
+
+  // 5. Language filter (e.g. en, bn, hi, ja, ko, es, fr, de, zh, it)
+  if (filters.language) {
+    const targetLang = filters.language.toLowerCase();
+    if (item.originalLanguage) {
+      if (item.originalLanguage.toLowerCase() !== targetLang) {
+        return false;
+      }
+    } else {
+      if (targetLang === 'ja' && item.category !== 'anime') return false;
+      if (targetLang === 'en' && item.category === 'anime') return false;
+    }
+  }
+
+  return true;
+}
+
+// Build URL query params for TMDB Discover Movie
+function buildMovieDiscoverParams(filters?: AdvancedSearchFilters): string {
+  if (!filters) return '';
+  let params = '';
+  if (filters.genre && GENRE_NAME_TO_MOVIE_ID[filters.genre]) {
+    params += `&with_genres=${GENRE_NAME_TO_MOVIE_ID[filters.genre]}`;
+  }
+  if (filters.language) {
+    params += `&with_original_language=${filters.language}`;
+  }
+  if (filters.country) {
+    params += `&with_origin_country=${filters.country}`;
+  }
+  if (filters.year && /^\d{4}$/.test(filters.year.trim())) {
+    params += `&primary_release_year=${filters.year.trim()}`;
+  }
+  return params;
+}
+
+// Build URL query params for TMDB Discover TV
+function buildTvDiscoverParams(filters?: AdvancedSearchFilters): string {
+  if (!filters) return '';
+  let params = '';
+  if (filters.genre && GENRE_NAME_TO_TV_ID[filters.genre]) {
+    params += `&with_genres=${GENRE_NAME_TO_TV_ID[filters.genre]}`;
+  }
+  if (filters.language) {
+    params += `&with_original_language=${filters.language}`;
+  }
+  if (filters.country) {
+    params += `&with_origin_country=${filters.country}`;
+  }
+  if (filters.year && /^\d{4}$/.test(filters.year.trim())) {
+    params += `&first_air_date_year=${filters.year.trim()}`;
+  }
+  return params;
+}
+
 // --- Fetch TMDB Movies with Unlimited Pagination (Trending or Discover for 500+ pages) ---
-export async function fetchMovies(searchQuery = '', page = 1): Promise<FetchResult> {
+export async function fetchMovies(searchQuery = '', page = 1, filters?: AdvancedSearchFilters): Promise<FetchResult> {
   try {
     const key = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_API_KEY) || TMDB_API_KEY;
     const baseUrl = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_BASE_URL) || TMDB_BASE_URL;
 
-    // Use search endpoint when query is present; otherwise use discover/movie for virtually infinite pages
-    const url = searchQuery.trim()
-      ? `${baseUrl}/search/movie?api_key=${key}&query=${encodeURIComponent(searchQuery)}&include_adult=false&page=${page}`
-      : `${baseUrl}/discover/movie?api_key=${key}&sort_by=popularity.desc&include_adult=false&include_video=false&page=${page}`;
+    // Use search endpoint when query is present; otherwise use discover/movie
+    let url: string;
+    if (searchQuery.trim()) {
+      url = `${baseUrl}/search/movie?api_key=${key}&query=${encodeURIComponent(searchQuery)}&include_adult=false&page=${page}`;
+      if (filters?.year && /^\d{4}$/.test(filters.year)) {
+        url += `&primary_release_year=${filters.year}`;
+      }
+    } else {
+      url = `${baseUrl}/discover/movie?api_key=${key}&sort_by=popularity.desc&include_adult=false&include_video=false&page=${page}${buildMovieDiscoverParams(filters)}`;
+    }
 
     const res = await fetch(url);
     if (!res.ok) throw new Error(`TMDB Movie HTTP error: ${res.status}`);
     const data = await res.json();
 
     if (Array.isArray(data.results)) {
-      const items = data.results.map(transformTmdbMovie);
+      let items = data.results.map(transformTmdbMovie);
+      if (filters) {
+        items = items.filter((item) => matchesAdvancedFilters(item, filters));
+      }
       const totalPages = data.total_pages || 500;
       return {
         items,
@@ -308,9 +484,9 @@ export async function fetchMovies(searchQuery = '', page = 1): Promise<FetchResu
 
   // Fallback to static data on page 1 only
   const fallback = MEDIA_COLLECTION.filter((i) => i.category === 'movies');
-  const filtered = !searchQuery.trim()
-    ? fallback
-    : fallback.filter((i) => i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.genres.some((g) => g.toLowerCase().includes(searchQuery.toLowerCase())));
+  const filtered = fallback
+    .filter((i) => !searchQuery.trim() || i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.genres.some((g) => g.toLowerCase().includes(searchQuery.toLowerCase())))
+    .filter((i) => matchesAdvancedFilters(i, filters));
 
   return {
     items: page === 1 ? filtered : [],
@@ -319,22 +495,31 @@ export async function fetchMovies(searchQuery = '', page = 1): Promise<FetchResu
 }
 
 // --- Fetch TMDB TV Shows with Unlimited Pagination (Trending or Discover for 500+ pages) ---
-export async function fetchTvShows(searchQuery = '', page = 1): Promise<FetchResult> {
+export async function fetchTvShows(searchQuery = '', page = 1, filters?: AdvancedSearchFilters): Promise<FetchResult> {
   try {
     const key = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_API_KEY) || TMDB_API_KEY;
     const baseUrl = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_BASE_URL) || TMDB_BASE_URL;
 
-    // Use search endpoint when query is present; otherwise use discover/tv for virtually infinite pages
-    const url = searchQuery.trim()
-      ? `${baseUrl}/search/tv?api_key=${key}&query=${encodeURIComponent(searchQuery)}&include_adult=false&page=${page}`
-      : `${baseUrl}/discover/tv?api_key=${key}&sort_by=popularity.desc&include_adult=false&page=${page}`;
+    // Use search endpoint when query is present; otherwise use discover/tv
+    let url: string;
+    if (searchQuery.trim()) {
+      url = `${baseUrl}/search/tv?api_key=${key}&query=${encodeURIComponent(searchQuery)}&include_adult=false&page=${page}`;
+      if (filters?.year && /^\d{4}$/.test(filters.year)) {
+        url += `&first_air_date_year=${filters.year}`;
+      }
+    } else {
+      url = `${baseUrl}/discover/tv?api_key=${key}&sort_by=popularity.desc&include_adult=false&page=${page}${buildTvDiscoverParams(filters)}`;
+    }
 
     const res = await fetch(url);
     if (!res.ok) throw new Error(`TMDB TV HTTP error: ${res.status}`);
     const data = await res.json();
 
     if (Array.isArray(data.results)) {
-      const items = data.results.map(transformTmdbTv);
+      let items = data.results.map(transformTmdbTv);
+      if (filters) {
+        items = items.filter((item) => matchesAdvancedFilters(item, filters));
+      }
       const totalPages = data.total_pages || 500;
       return {
         items,
@@ -348,9 +533,9 @@ export async function fetchTvShows(searchQuery = '', page = 1): Promise<FetchRes
 
   // Fallback to static data on page 1 only
   const fallback = MEDIA_COLLECTION.filter((i) => i.category === 'tv');
-  const filtered = !searchQuery.trim()
-    ? fallback
-    : fallback.filter((i) => i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.genres.some((g) => g.toLowerCase().includes(searchQuery.toLowerCase())));
+  const filtered = fallback
+    .filter((i) => !searchQuery.trim() || i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.genres.some((g) => g.toLowerCase().includes(searchQuery.toLowerCase())))
+    .filter((i) => matchesAdvancedFilters(i, filters));
 
   return {
     items: page === 1 ? filtered : [],
@@ -359,15 +544,23 @@ export async function fetchTvShows(searchQuery = '', page = 1): Promise<FetchRes
 }
 
 // --- Fetch Anime from TMDB with Unlimited Pagination (with_genres=16 & with_original_language=ja) ---
-export async function fetchAnime(searchQuery = '', page = 1): Promise<FetchResult> {
+export async function fetchAnime(searchQuery = '', page = 1, filters?: AdvancedSearchFilters): Promise<FetchResult> {
   try {
     const key = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_API_KEY) || TMDB_API_KEY;
     const baseUrl = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_BASE_URL) || TMDB_BASE_URL;
 
-    // Use search endpoint when query is present; otherwise discover anime (Animation genre 16 + Japanese original language ja)
-    const url = searchQuery.trim()
-      ? `${baseUrl}/search/tv?api_key=${key}&query=${encodeURIComponent(searchQuery)}&include_adult=false&page=${page}`
-      : `${baseUrl}/discover/tv?api_key=${key}&with_genres=16&with_original_language=ja&sort_by=popularity.desc&page=${page}`;
+    // Discover anime (Animation genre 16 + language)
+    let url: string;
+    if (searchQuery.trim()) {
+      url = `${baseUrl}/search/tv?api_key=${key}&query=${encodeURIComponent(searchQuery)}&include_adult=false&page=${page}`;
+      if (filters?.year && /^\d{4}$/.test(filters.year)) {
+        url += `&first_air_date_year=${filters.year}`;
+      }
+    } else {
+      const extra = buildTvDiscoverParams(filters);
+      const langParam = filters?.language ? '' : '&with_original_language=ja';
+      url = `${baseUrl}/discover/tv?api_key=${key}&with_genres=16${langParam}&sort_by=popularity.desc&page=${page}${extra}`;
+    }
 
     const res = await fetch(url);
     if (!res.ok) throw new Error(`TMDB Anime HTTP error: ${res.status}`);
@@ -377,7 +570,7 @@ export async function fetchAnime(searchQuery = '', page = 1): Promise<FetchResul
       let results: TmdbTvResult[] = data.results;
 
       // When searching, prioritize anime/animation or Japanese origin if matched
-      if (searchQuery.trim()) {
+      if (searchQuery.trim() && !filters?.genre && !filters?.language) {
         const animeFiltered = results.filter((tv) => 
           tv.genre_ids?.includes(16) || 
           tv.original_language === 'ja' || 
@@ -388,7 +581,10 @@ export async function fetchAnime(searchQuery = '', page = 1): Promise<FetchResul
         }
       }
 
-      const items = results.map(transformTmdbAnime);
+      let items = results.map(transformTmdbAnime);
+      if (filters) {
+        items = items.filter((item) => matchesAdvancedFilters(item, filters));
+      }
       const totalPages = data.total_pages || 500;
       return {
         items,
@@ -402,9 +598,9 @@ export async function fetchAnime(searchQuery = '', page = 1): Promise<FetchResul
 
   // Fallback to static data on page 1 only
   const fallback = MEDIA_COLLECTION.filter((i) => i.category === 'anime');
-  const filtered = !searchQuery.trim()
-    ? fallback
-    : fallback.filter((i) => i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.genres.some((g) => g.toLowerCase().includes(searchQuery.toLowerCase())));
+  const filtered = fallback
+    .filter((i) => !searchQuery.trim() || i.title.toLowerCase().includes(searchQuery.toLowerCase()) || i.genres.some((g) => g.toLowerCase().includes(searchQuery.toLowerCase())))
+    .filter((i) => matchesAdvancedFilters(i, filters));
 
   return {
     items: page === 1 ? filtered : [],
@@ -412,17 +608,43 @@ export async function fetchAnime(searchQuery = '', page = 1): Promise<FetchResul
   };
 }
 
-// Master dispatcher based on active category & page
+// Master dispatcher based on active category & page & filters
 export async function loadCategoryMedia(
   category: CategoryType, 
   searchQuery = '', 
-  page = 1
+  page = 1,
+  filters?: AdvancedSearchFilters
 ): Promise<FetchResult> {
-  if (category === 'movies') {
-    return fetchMovies(searchQuery, page);
-  } else if (category === 'tv') {
-    return fetchTvShows(searchQuery, page);
+  const targetCategory = (filters && filters.category && filters.category !== 'all') 
+    ? filters.category 
+    : (filters && filters.category === 'all' ? 'all' : category);
+
+  if (targetCategory === 'all') {
+    // Cross-category search across movies, TV shows, and anime
+    const [moviesRes, tvRes] = await Promise.all([
+      fetchMovies(searchQuery, page, filters),
+      fetchTvShows(searchQuery, page, filters),
+    ]);
+
+    const interleaved: MediaItem[] = [];
+    const maxLen = Math.max(moviesRes.items.length, tvRes.items.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (moviesRes.items[i]) interleaved.push(moviesRes.items[i]);
+      if (tvRes.items[i]) interleaved.push(tvRes.items[i]);
+    }
+
+    return {
+      items: interleaved,
+      hasMore: moviesRes.hasMore || tvRes.hasMore,
+      totalPages: Math.max(moviesRes.totalPages || 0, tvRes.totalPages || 0),
+    };
+  }
+
+  if (targetCategory === 'movies') {
+    return fetchMovies(searchQuery, page, filters);
+  } else if (targetCategory === 'tv') {
+    return fetchTvShows(searchQuery, page, filters);
   } else {
-    return fetchAnime(searchQuery, page);
+    return fetchAnime(searchQuery, page, filters);
   }
 }
