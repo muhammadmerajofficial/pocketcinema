@@ -1068,13 +1068,11 @@ export default function App() {
             soundFx.playClick('switch');
             autoPlayCategoryChangeRef.current = true;
             if (cat === activeCategory) {
-              fetchInitialMedia(cat, searchQuery, true, advancedFilters);
+              fetchInitialMedia(cat, searchQuery, true, { ...advancedFilters, category: cat });
             } else {
               setActiveCategory(cat);
               setSearchQuery('');
-              if (advancedFilters.category !== 'all' && advancedFilters.category !== cat) {
-                setAdvancedFilters((prev) => ({ ...prev, category: 'all' }));
-              }
+              setAdvancedFilters((prev) => ({ ...prev, category: cat }));
             }
           }}
         />

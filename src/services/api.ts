@@ -516,7 +516,13 @@ export async function fetchTvShows(searchQuery = '', page = 1, filters?: Advance
     const data = await res.json();
 
     if (Array.isArray(data.results)) {
-      let items = data.results.map(transformTmdbTv);
+      // Exclude Japanese anime from general TV shows so anime stays strictly in the Anime tab
+      const tvResults = data.results.filter((tv) => {
+        const isAnime = tv.original_language === 'ja' && tv.genre_ids?.includes(16);
+        return !isAnime;
+      });
+
+      let items = tvResults.map(transformTmdbTv);
       if (filters) {
         items = items.filter((item) => matchesAdvancedFilters(item, filters));
       }
@@ -615,36 +621,29 @@ export async function loadCategoryMedia(
   page = 1,
   filters?: AdvancedSearchFilters
 ): Promise<FetchResult> {
-  const targetCategory = (filters && filters.category && filters.category !== 'all') 
-    ? filters.category 
-    : (filters && filters.category === 'all' ? 'all' : category);
+  // Strictly determine target category:
+  // If user explicitly picked a specific category in filters ('movies', 'tv', 'anime'), respect it;
+  // otherwise strictly adhere to the selected active category tab ('movies', 'tv', or 'anime').
+  const targetCategory: CategoryType = 
+    (filters && filters.category && filters.category !== 'all') 
+      ? filters.category 
+      : category;
 
-  if (targetCategory === 'all') {
-    // Cross-category search across movies, TV shows, and anime
-    const [moviesRes, tvRes] = await Promise.all([
-      fetchMovies(searchQuery, page, filters),
-      fetchTvShows(searchQuery, page, filters),
-    ]);
-
-    const interleaved: MediaItem[] = [];
-    const maxLen = Math.max(moviesRes.items.length, tvRes.items.length);
-    for (let i = 0; i < maxLen; i++) {
-      if (moviesRes.items[i]) interleaved.push(moviesRes.items[i]);
-      if (tvRes.items[i]) interleaved.push(tvRes.items[i]);
-    }
-
-    return {
-      items: interleaved,
-      hasMore: moviesRes.hasMore || tvRes.hasMore,
-      totalPages: Math.max(moviesRes.totalPages || 0, tvRes.totalPages || 0),
-    };
-  }
-
+  let result: FetchResult;
   if (targetCategory === 'movies') {
-    return fetchMovies(searchQuery, page, filters);
+    result = await fetchMovies(searchQuery, page, filters);
   } else if (targetCategory === 'tv') {
-    return fetchTvShows(searchQuery, page, filters);
+    result = await fetchTvShows(searchQuery, page, filters);
   } else {
-    return fetchAnime(searchQuery, page, filters);
+    result = await fetchAnime(searchQuery, page, filters);
   }
+
+  // Strictly enforce category isolation to ensure:
+  // - Movie list contains ONLY movies
+  // - TV Show list contains ONLY TV shows
+  // - Anime list contains ONLY anime
+  return {
+    ...result,
+    items: result.items.filter((item) => item.category === targetCategory),
+  };
 }
