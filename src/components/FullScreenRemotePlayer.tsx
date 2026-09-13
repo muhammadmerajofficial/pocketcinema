@@ -103,23 +103,114 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
         cw.postMessage('{"api":"pause"}', '*');
         cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'pause' }, '*');
         cw.postMessage({ event: 'command', func: 'pause', args: [] }, '*');
+      } else if (command === 'rewind' || command === 'forward') {
+        const isRewind = command === 'rewind';
+        const delta = typeof extra === 'number' ? extra : (isRewind ? -10 : 10);
+        const absDelta = Math.abs(delta);
+        const signStr = isRewind ? `-${absDelta}` : `+${absDelta}`;
+        const targetSec = typeof value === 'number' && !isNaN(value) ? Math.max(0, value) : undefined;
+
+        // 1. Relative PlayerJS delta seek via "+10" / "-10" string (PlayerJS built-in standard)
+        cw.postMessage({ api: 'seek', set: signStr }, '*');
+        cw.postMessage({ api: 'seek', val: signStr }, '*');
+        cw.postMessage({ api: 'seek', value: signStr }, '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', set: signStr }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', val: signStr }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', value: signStr }), '*');
+        cw.postMessage(`seek:${signStr}`, '*');
+        cw.postMessage(`api:seek:${signStr}`, '*');
+        cw.postMessage(`{"api":"seek","set":"${signStr}"}`, '*');
+        cw.postMessage(`{"api":"seek","val":"${signStr}"}`, '*');
+
+        // 2. Relative rewind / forward command names
+        const deltaCmd = isRewind ? 'rewind' : 'forward';
+        cw.postMessage({ api: deltaCmd, set: absDelta }, '*');
+        cw.postMessage({ api: deltaCmd, val: absDelta }, '*');
+        cw.postMessage({ api: deltaCmd, value: absDelta }, '*');
+        cw.postMessage(JSON.stringify({ api: deltaCmd, set: absDelta }), '*');
+        cw.postMessage(`${deltaCmd}:${absDelta}`, '*');
+        cw.postMessage(`api:${deltaCmd}:${absDelta}`, '*');
+        cw.postMessage({ action: deltaCmd, delta }, '*');
+        cw.postMessage({ type: deltaCmd, delta }, '*');
+
+        // 3. Absolute seek to calculated target time
+        if (typeof targetSec === 'number') {
+          cw.postMessage({ api: 'seek', set: targetSec }, '*');
+          cw.postMessage({ api: 'seek', val: targetSec }, '*');
+          cw.postMessage({ api: 'seek', value: targetSec }, '*');
+          cw.postMessage({ api: 'time', set: targetSec }, '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', set: targetSec }), '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', val: targetSec }), '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', value: targetSec }), '*');
+          cw.postMessage(`seek:${targetSec}`, '*');
+          cw.postMessage(`api:seek:${targetSec}`, '*');
+          cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', arg: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', method: 'seek', value: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', method: 'seek', arg: targetSec }, '*');
+          cw.postMessage(JSON.stringify({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }), '*');
+          cw.postMessage({ event: 'command', func: 'seek', args: [targetSec] }, '*');
+          cw.postMessage({ action: 'seek', time: targetSec }, '*');
+          cw.postMessage({ action: 'seek', value: targetSec }, '*');
+          cw.postMessage({ type: 'seek', time: targetSec }, '*');
+          cw.postMessage({ type: 'seek', value: targetSec }, '*');
+          cw.postMessage({ type: 'seek', payload: targetSec }, '*');
+          cw.postMessage({ method: 'seek', args: [targetSec] }, '*');
+          cw.postMessage({ method: 'setCurrentTime', args: [targetSec] }, '*');
+        }
+
+        // 4. Keyboard simulation
+        const keyCode = isRewind ? 37 : 39;
+        const key = isRewind ? 'ArrowLeft' : 'ArrowRight';
+        const letterKey = isRewind ? 'j' : 'l';
+        const letterCode = isRewind ? 74 : 76;
+        cw.postMessage({ type: 'keydown', key, code: key, keyCode, which: keyCode }, '*');
+        cw.postMessage({ event: 'keydown', key, code: key, keyCode, which: keyCode }, '*');
+        cw.postMessage({ type: 'keydown', key: letterKey, code: `Key${letterKey.toUpperCase()}`, keyCode: letterCode, which: letterCode }, '*');
+        cw.postMessage({ event: 'keydown', key: letterKey, code: `Key${letterKey.toUpperCase()}`, keyCode: letterCode, which: letterCode }, '*');
+
+        // 5. EmbedMaster protocol
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command,
+          value: targetSec !== undefined ? targetSec : absDelta,
+          extra: delta,
+        }, '*');
+
+        // 6. Focus iframe
+        try {
+          iframeRef.current?.focus?.();
+        } catch (_) {}
       } else if (command === 'seek') {
-        const targetSec = Math.max(0, Number(value) || 0);
+        const targetSec = typeof value === 'number' && !isNaN(value)
+          ? Math.max(0, value)
+          : typeof extra === 'number'
+            ? Math.max(0, localCurrentTimeRef.current + extra)
+            : 0;
         localCurrentTimeRef.current = targetSec;
 
         // 1. PlayerJS seek & time commands (object and JSON string)
         cw.postMessage({ api: 'seek', set: targetSec }, '*');
+        cw.postMessage({ api: 'seek', val: targetSec }, '*');
+        cw.postMessage({ api: 'seek', value: targetSec }, '*');
         cw.postMessage({ api: 'time', set: targetSec }, '*');
         cw.postMessage(JSON.stringify({ api: 'seek', set: targetSec }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', val: targetSec }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', value: targetSec }), '*');
         cw.postMessage(JSON.stringify({ api: 'time', set: targetSec }), '*');
         cw.postMessage(`seek:${targetSec}`, '*');
         cw.postMessage(`time:${targetSec}`, '*');
+        cw.postMessage(`api:seek:${targetSec}`, '*');
 
         // Relative delta (e.g. forward 10 or rewind 10)
         if (typeof extra === 'number') {
           const delta = extra;
           const deltaCmd = delta > 0 ? 'forward' : 'rewind';
           const absVal = Math.abs(delta);
+          const signStr = delta > 0 ? `+${absVal}` : `-${absVal}`;
+          cw.postMessage({ api: 'seek', set: signStr }, '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', set: signStr }), '*');
+          cw.postMessage(`seek:${signStr}`, '*');
           cw.postMessage({ api: deltaCmd, set: absVal }, '*');
           cw.postMessage(JSON.stringify({ api: deltaCmd, set: absVal }), '*');
           cw.postMessage(`${deltaCmd}:${absVal}`, '*');
@@ -127,12 +218,28 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
 
         // 2. Player.js specification
         cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }, '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', arg: targetSec }, '*');
+        cw.postMessage({ context: 'player.js', method: 'seek', value: targetSec }, '*');
+        cw.postMessage({ context: 'player.js', method: 'seek', arg: targetSec }, '*');
         cw.postMessage(JSON.stringify({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }), '*');
 
         // 3. JWPlayer / VideoJS / HTML5 Generic
         cw.postMessage({ event: 'command', func: 'seek', args: [targetSec] }, '*');
         cw.postMessage({ action: 'seek', time: targetSec }, '*');
+        cw.postMessage({ action: 'seek', value: targetSec }, '*');
         cw.postMessage({ type: 'seek', time: targetSec }, '*');
+        cw.postMessage({ type: 'seek', value: targetSec }, '*');
+        cw.postMessage({ type: 'seek', payload: targetSec }, '*');
+        cw.postMessage({ method: 'seek', args: [targetSec] }, '*');
+        cw.postMessage({ method: 'setCurrentTime', args: [targetSec] }, '*');
+
+        // EmbedMaster protocol
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: 'seek',
+          value: targetSec,
+          extra,
+        }, '*');
       } else if (command === 'volume') {
         const vol = Number(value);
         cw.postMessage({ api: 'volume', set: vol / 100 }, '*');
@@ -189,9 +296,10 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
 
     if (command === 'rewind') {
       const delta = typeof extra === 'number' ? extra : -10;
-      const targetSec = Math.max(0, localCurrentTimeRef.current + delta);
+      const absDelta = Math.abs(delta);
+      const targetSec = Math.max(0, localCurrentTimeRef.current - absDelta);
       localCurrentTimeRef.current = targetSec;
-      sendCommandToIframe('seek', targetSec, delta);
+      sendCommandToIframe('rewind', targetSec, -absDelta);
       const now = Date.now();
       const statusData = {
         isPlaying: localIsPlayingRef.current,
@@ -212,9 +320,12 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
 
     if (command === 'forward') {
       const delta = typeof extra === 'number' ? extra : 10;
-      const targetSec = Math.min(localDurationRef.current, localCurrentTimeRef.current + delta);
+      const absDelta = Math.abs(delta);
+      const targetSec = localDurationRef.current > 0
+        ? Math.min(localDurationRef.current, localCurrentTimeRef.current + absDelta)
+        : localCurrentTimeRef.current + absDelta;
       localCurrentTimeRef.current = targetSec;
-      sendCommandToIframe('seek', targetSec, delta);
+      sendCommandToIframe('forward', targetSec, absDelta);
       const now = Date.now();
       const statusData = {
         isPlaying: localIsPlayingRef.current,
@@ -331,14 +442,30 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
           // PlayerJS / Player.js events
           if (data.event === 'play') isPlay = true;
           if (data.event === 'pause') isPlay = false;
-          if (typeof data.time === 'number') currTime = data.time;
-          if (typeof data.duration === 'number') dur = data.duration;
-          if (typeof data.data?.seconds === 'number') currTime = data.data.seconds;
-          if (typeof data.data?.duration === 'number') dur = data.data.duration;
+          if (data.event === 'time') {
+            const t = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.time === 'number' ? data.time : null;
+            if (t !== null && !isNaN(t) && t >= 0) currTime = t;
+          } else if (data.event === 'duration') {
+            const d = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.duration === 'number' ? data.duration : null;
+            if (d !== null && !isNaN(d) && d > 0) dur = d;
+          } else {
+            if (typeof data.time === 'number') currTime = data.time;
+            if (typeof data.duration === 'number') dur = data.duration;
+            if (typeof data.data?.seconds === 'number') currTime = data.data.seconds;
+            if (typeof data.data?.duration === 'number') dur = data.data.duration;
+          }
         } else if (data.api) {
           if (data.api === 'play') isPlay = true;
           if (data.api === 'pause') isPlay = false;
-          if (typeof data.set === 'number') currTime = data.set;
+          if (data.api === 'time') {
+            const t = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.set === 'number' ? data.set : null;
+            if (t !== null && !isNaN(t) && t >= 0) currTime = t;
+          } else if (data.api === 'duration') {
+            const d = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.set === 'number' ? data.set : null;
+            if (d !== null && !isNaN(d) && d > 0) dur = d;
+          } else if (typeof data.set === 'number') {
+            currTime = data.set;
+          }
         }
       }
 
@@ -387,8 +514,22 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
     const interval = setInterval(() => {
       if (localIsPlayingRef.current) {
         localCurrentTimeRef.current += 1;
+
+        // Poll iframe player for real playback time
+        const frame = iframeRef.current;
+        if (frame?.contentWindow) {
+          try {
+            frame.contentWindow.postMessage({ api: 'time' }, '*');
+            frame.contentWindow.postMessage(JSON.stringify({ api: 'time' }), '*');
+            frame.contentWindow.postMessage('time', '*');
+            frame.contentWindow.postMessage({ api: 'duration' }, '*');
+            frame.contentWindow.postMessage(JSON.stringify({ api: 'duration' }), '*');
+            frame.contentWindow.postMessage('duration', '*');
+          } catch (_) {}
+        }
+
         const now = Date.now();
-        if (now - lastBroadcastRef.current >= 2000) {
+        if (now - lastBroadcastRef.current >= 1500) {
           lastBroadcastRef.current = now;
           const statusData = {
             isPlaying: true,
@@ -442,10 +583,10 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
         }
       },
       onSeekForward: () => {
-        sendCommandToIframe('seek', localCurrentTimeRef.current + 10, 10);
+        executePlayerCommand('forward', undefined, 10);
       },
       onSeekBackward: () => {
-        sendCommandToIframe('seek', Math.max(0, localCurrentTimeRef.current - 10), -10);
+        executePlayerCommand('rewind', undefined, -10);
       },
     });
     return unregister;

@@ -446,9 +446,9 @@ export const LiveDisplayScreen: React.FC = () => {
         handleVirtualMouseClick(msg.x, msg.y, msg.button || 'left');
       } else if (msg.type === 'MOUSE_SCROLL') {
         if (msg.deltaY > 0) {
-          setLatestCommand({ command: 'seek', extra: 10, timestamp: Date.now() });
+          setLatestCommand({ command: 'forward', extra: 10, timestamp: Date.now() });
         } else {
-          setLatestCommand({ command: 'seek', extra: -10, timestamp: Date.now() });
+          setLatestCommand({ command: 'rewind', extra: -10, timestamp: Date.now() });
         }
         triggerTouchActivity();
       }
@@ -969,7 +969,7 @@ export const LiveDisplayScreen: React.FC = () => {
           onClick={(e) => {
             e.stopPropagation();
             soundFx.playClick('nav');
-            setLatestCommand({ command: 'seek', extra: -10, timestamp: Date.now() });
+            setLatestCommand({ command: 'rewind', extra: -10, timestamp: Date.now() });
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
           title="Rewind 10s"
@@ -1010,7 +1010,7 @@ export const LiveDisplayScreen: React.FC = () => {
           onClick={(e) => {
             e.stopPropagation();
             soundFx.playClick('nav');
-            setLatestCommand({ command: 'seek', extra: 10, timestamp: Date.now() });
+            setLatestCommand({ command: 'forward', extra: 10, timestamp: Date.now() });
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
           title="Forward 10s"

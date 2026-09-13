@@ -595,6 +595,7 @@ export default function App() {
   };
 
   const handleRewind10 = () => {
+    soundFx.playClick('nav');
     const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
     const ts = Date.now();
     syncManager.broadcast({
@@ -612,6 +613,7 @@ export default function App() {
   };
 
   const handleForward10 = () => {
+    soundFx.playClick('nav');
     const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
     const ts = Date.now();
     syncManager.broadcast({

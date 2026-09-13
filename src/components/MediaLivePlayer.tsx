@@ -190,52 +190,280 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
     }
   }, [currentEpisode]);
 
-  // EMBEDMASTER POSTMESSAGE COMMAND DISPATCHER
-  const sendEmbedMasterCommand = useCallback((command: string, value?: any) => {
+  // EMBEDMASTER, PLAYERJS & KEYBOARD POSTMESSAGE COMMAND DISPATCHER
+  const sendEmbedMasterCommand = useCallback((command: string, value?: any, extra?: any) => {
     const frame = iframeRef.current || (document.getElementById('embedmaster_iframe') as HTMLIFrameElement | null);
     if (!frame || !frame.contentWindow) return;
 
     try {
-      frame.contentWindow.postMessage({
-        source: 'embedmaster_player_command',
-        command: command,
-        value: value
-      }, '*');
+      const cw = frame.contentWindow;
+
+      if (command === 'play') {
+        cw.postMessage('play', '*');
+        cw.postMessage({ api: 'play' }, '*');
+        cw.postMessage(JSON.stringify({ api: 'play' }), '*');
+        cw.postMessage('{"api":"play"}', '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'play' }, '*');
+        cw.postMessage({ event: 'command', func: 'play', args: [] }, '*');
+        cw.postMessage({ action: 'play' }, '*');
+      } else if (command === 'pause') {
+        cw.postMessage('pause', '*');
+        cw.postMessage({ api: 'pause' }, '*');
+        cw.postMessage(JSON.stringify({ api: 'pause' }), '*');
+        cw.postMessage('{"api":"pause"}', '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'pause' }, '*');
+        cw.postMessage({ event: 'command', func: 'pause', args: [] }, '*');
+        cw.postMessage({ action: 'pause' }, '*');
+      } else if (command === 'rewind' || command === 'forward') {
+        const isRewind = command === 'rewind';
+        const delta = typeof extra === 'number' ? extra : (isRewind ? -10 : 10);
+        const absDelta = Math.abs(delta);
+        const signStr = isRewind ? `-${absDelta}` : `+${absDelta}`;
+        const targetSec = typeof value === 'number' && !isNaN(value) ? Math.max(0, value) : undefined;
+
+        // 1. Relative PlayerJS delta seek via "+10" / "-10" string (PlayerJS built-in standard)
+        cw.postMessage({ api: 'seek', set: signStr }, '*');
+        cw.postMessage({ api: 'seek', val: signStr }, '*');
+        cw.postMessage({ api: 'seek', value: signStr }, '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', set: signStr }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', val: signStr }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', value: signStr }), '*');
+        cw.postMessage(`seek:${signStr}`, '*');
+        cw.postMessage(`api:seek:${signStr}`, '*');
+        cw.postMessage(`{"api":"seek","set":"${signStr}"}`, '*');
+        cw.postMessage(`{"api":"seek","val":"${signStr}"}`, '*');
+
+        // 2. Relative rewind / forward command names
+        const deltaCmd = isRewind ? 'rewind' : 'forward';
+        cw.postMessage({ api: deltaCmd, set: absDelta }, '*');
+        cw.postMessage({ api: deltaCmd, val: absDelta }, '*');
+        cw.postMessage({ api: deltaCmd, value: absDelta }, '*');
+        cw.postMessage(JSON.stringify({ api: deltaCmd, set: absDelta }), '*');
+        cw.postMessage(`${deltaCmd}:${absDelta}`, '*');
+        cw.postMessage(`api:${deltaCmd}:${absDelta}`, '*');
+        cw.postMessage({ action: deltaCmd, delta }, '*');
+        cw.postMessage({ type: deltaCmd, delta }, '*');
+
+        // 3. Absolute seek to calculated target time
+        if (typeof targetSec === 'number') {
+          cw.postMessage({ api: 'seek', set: targetSec }, '*');
+          cw.postMessage({ api: 'seek', val: targetSec }, '*');
+          cw.postMessage({ api: 'seek', value: targetSec }, '*');
+          cw.postMessage({ api: 'time', set: targetSec }, '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', set: targetSec }), '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', val: targetSec }), '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', value: targetSec }), '*');
+          cw.postMessage(`seek:${targetSec}`, '*');
+          cw.postMessage(`api:seek:${targetSec}`, '*');
+          cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', arg: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', method: 'seek', value: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', method: 'seek', arg: targetSec }, '*');
+          cw.postMessage(JSON.stringify({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }), '*');
+          cw.postMessage({ event: 'command', func: 'seek', args: [targetSec] }, '*');
+          cw.postMessage({ action: 'seek', time: targetSec }, '*');
+          cw.postMessage({ action: 'seek', value: targetSec }, '*');
+          cw.postMessage({ type: 'seek', time: targetSec }, '*');
+          cw.postMessage({ type: 'seek', value: targetSec }, '*');
+          cw.postMessage({ type: 'seek', payload: targetSec }, '*');
+          cw.postMessage({ method: 'seek', args: [targetSec] }, '*');
+          cw.postMessage({ method: 'setCurrentTime', args: [targetSec] }, '*');
+        }
+
+        // 4. Keyboard simulation (ArrowLeft / ArrowRight, j / l)
+        const keyCode = isRewind ? 37 : 39;
+        const key = isRewind ? 'ArrowLeft' : 'ArrowRight';
+        const letterKey = isRewind ? 'j' : 'l';
+        const letterCode = isRewind ? 74 : 76;
+        cw.postMessage({ type: 'keydown', key, code: key, keyCode, which: keyCode }, '*');
+        cw.postMessage({ event: 'keydown', key, code: key, keyCode, which: keyCode }, '*');
+        cw.postMessage({ type: 'keydown', key: letterKey, code: `Key${letterKey.toUpperCase()}`, keyCode: letterCode, which: letterCode }, '*');
+        cw.postMessage({ event: 'keydown', key: letterKey, code: `Key${letterKey.toUpperCase()}`, keyCode: letterCode, which: letterCode }, '*');
+
+        // 5. EmbedMaster protocol
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command,
+          value: targetSec !== undefined ? targetSec : absDelta,
+          extra: delta,
+        }, '*');
+
+        // 6. Focus iframe
+        try {
+          frame.focus?.();
+        } catch (_) {}
+      } else if (command === 'seek') {
+        const target = typeof value === 'number' && !isNaN(value)
+          ? Math.max(0, value)
+          : typeof extra === 'number'
+            ? Math.max(0, currentTimeRef.current + extra)
+            : 0;
+        currentTimeRef.current = target;
+        cw.postMessage({ api: 'seek', set: target }, '*');
+        cw.postMessage({ api: 'seek', val: target }, '*');
+        cw.postMessage({ api: 'seek', value: target }, '*');
+        cw.postMessage({ api: 'time', set: target }, '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', set: target }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', val: target }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', value: target }), '*');
+        cw.postMessage(`seek:${target}`, '*');
+        cw.postMessage(`time:${target}`, '*');
+        cw.postMessage(`api:seek:${target}`, '*');
+
+        if (typeof extra === 'number') {
+          const delta = extra;
+          const deltaCmd = delta > 0 ? 'forward' : 'rewind';
+          const absVal = Math.abs(delta);
+          const signStr = delta > 0 ? `+${absVal}` : `-${absVal}`;
+          cw.postMessage({ api: 'seek', set: signStr }, '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', set: signStr }), '*');
+          cw.postMessage(`seek:${signStr}`, '*');
+          cw.postMessage({ api: deltaCmd, set: absVal }, '*');
+          cw.postMessage(JSON.stringify({ api: deltaCmd, set: absVal }), '*');
+          cw.postMessage(`${deltaCmd}:${absVal}`, '*');
+        }
+
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: target }, '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', arg: target }, '*');
+        cw.postMessage({ context: 'player.js', method: 'seek', value: target }, '*');
+        cw.postMessage({ context: 'player.js', method: 'seek', arg: target }, '*');
+        cw.postMessage(JSON.stringify({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: target }), '*');
+        cw.postMessage({ event: 'command', func: 'seek', args: [target] }, '*');
+        cw.postMessage({ action: 'seek', time: target }, '*');
+        cw.postMessage({ action: 'seek', value: target }, '*');
+        cw.postMessage({ type: 'seek', time: target }, '*');
+        cw.postMessage({ type: 'seek', value: target }, '*');
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: 'seek',
+          value: target,
+          extra,
+        }, '*');
+      } else if (command === 'volume') {
+        const vol = Number(value);
+        cw.postMessage({ api: 'volume', set: vol / 100 }, '*');
+        cw.postMessage(JSON.stringify({ api: 'volume', set: vol / 100 }), '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setVolume', value: vol / 100 }, '*');
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: 'volume',
+          value: vol,
+        }, '*');
+      } else if (command === 'mute' || command === 'unmute') {
+        cw.postMessage(command, '*');
+        cw.postMessage({ api: command }, '*');
+        cw.postMessage(JSON.stringify({ api: command }), '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: command }, '*');
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: command,
+        }, '*');
+      } else {
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: command,
+          value: value,
+          extra: extra,
+        }, '*');
+      }
     } catch (err) {
       console.warn('[EmbedMaster] sendCommand error:', err);
     }
   }, []);
 
-  // Listen to EmbedMaster events coming from the iframe
+  // Listen to EmbedMaster and PlayerJS events coming from the iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      const data = event.data;
-      if (!data || data.source !== 'embedmaster_player') return;
+      let data = event.data;
+      if (!data) return;
 
-      setLastEvent(data.event || 'message');
+      // Handle raw string events from PlayerJS like "play", "pause", "time:12.3", "duration:540"
+      if (typeof data === 'string') {
+        const trimmed = data.trim();
+        if (trimmed === 'play') {
+          setIsPlaying(true);
+        } else if (trimmed === 'pause') {
+          setIsPlaying(false);
+        } else if (trimmed.startsWith('time:')) {
+          const t = parseFloat(trimmed.substring(5));
+          if (!isNaN(t) && t >= 0) setCurrentTime(t);
+        } else if (trimmed.startsWith('duration:')) {
+          const d = parseFloat(trimmed.substring(9));
+          if (!isNaN(d) && d > 0) setDuration(d);
+        } else {
+          try {
+            data = JSON.parse(trimmed);
+          } catch (_) {
+            return;
+          }
+        }
+      }
+
+      setLastEvent((typeof data === 'object' && data?.event) || 'message');
       setEventTime(Date.now());
 
       let currentPlayingState = isPlayingRef.current;
 
-      if (data.event === 'play') {
-        setIsPlaying(true);
-        currentPlayingState = true;
-      } else if (data.event === 'pause') {
-        setIsPlaying(false);
-        currentPlayingState = false;
-      } else if (data.event === 'time' && data.info) {
-        if (typeof data.info.time === 'number') {
-          setCurrentTime(data.info.time);
-        }
-        if (typeof data.info.duration === 'number' && data.info.duration > 0) {
-          setDuration(data.info.duration);
-        }
-      } else if (data.event === 'volume' && data.info) {
-        if (typeof data.info.volume === 'number') {
-          setVolume(data.info.volume);
-        }
-        if (typeof data.info.muted === 'boolean') {
-          setIsMuted(data.info.muted);
+      if (typeof data === 'object' && data !== null) {
+        if (data.source === 'embedmaster_player') {
+          if (data.event === 'play') {
+            setIsPlaying(true);
+            currentPlayingState = true;
+          } else if (data.event === 'pause') {
+            setIsPlaying(false);
+            currentPlayingState = false;
+          } else if (data.event === 'time' && data.info) {
+            if (typeof data.info.time === 'number') {
+              setCurrentTime(data.info.time);
+            }
+            if (typeof data.info.duration === 'number' && data.info.duration > 0) {
+              setDuration(data.info.duration);
+            }
+          } else if (data.event === 'volume' && data.info) {
+            if (typeof data.info.volume === 'number') {
+              setVolume(data.info.volume);
+            }
+            if (typeof data.info.muted === 'boolean') {
+              setIsMuted(data.info.muted);
+            }
+          }
+        } else if (data.event) {
+          if (data.event === 'play') {
+            setIsPlaying(true);
+            currentPlayingState = true;
+          } else if (data.event === 'pause') {
+            setIsPlaying(false);
+            currentPlayingState = false;
+          }
+          if (data.event === 'time') {
+            const t = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.time === 'number' ? data.time : null;
+            if (t !== null && !isNaN(t) && t >= 0) setCurrentTime(t);
+          } else if (data.event === 'duration') {
+            const d = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.duration === 'number' ? data.duration : null;
+            if (d !== null && !isNaN(d) && d > 0) setDuration(d);
+          } else {
+            if (typeof data.time === 'number') setCurrentTime(data.time);
+            if (typeof data.duration === 'number' && data.duration > 0) setDuration(data.duration);
+            if (typeof data.data?.seconds === 'number') setCurrentTime(data.data.seconds);
+            if (typeof data.data?.duration === 'number' && data.data.duration > 0) setDuration(data.data.duration);
+          }
+        } else if (data.api) {
+          if (data.api === 'play') {
+            setIsPlaying(true);
+            currentPlayingState = true;
+          } else if (data.api === 'pause') {
+            setIsPlaying(false);
+            currentPlayingState = false;
+          }
+          if (data.api === 'time') {
+            const t = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.set === 'number' ? data.set : null;
+            if (t !== null && !isNaN(t) && t >= 0) setCurrentTime(t);
+          } else if (data.api === 'duration') {
+            const d = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.set === 'number' ? data.set : null;
+            if (d !== null && !isNaN(d) && d > 0) setDuration(d);
+          } else if (typeof data.set === 'number') {
+            setCurrentTime(data.set);
+          }
         }
       }
 
@@ -261,6 +489,31 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Continuous local playback ticker when video is playing to keep currentTime moving
+  useEffect(() => {
+    if (!isPlaying) return;
+    const interval = setInterval(() => {
+      // Query player iframe for precise time
+      const frame = iframeRef.current;
+      if (frame?.contentWindow) {
+        try {
+          frame.contentWindow.postMessage({ api: 'time' }, '*');
+          frame.contentWindow.postMessage(JSON.stringify({ api: 'time' }), '*');
+          frame.contentWindow.postMessage('time', '*');
+          frame.contentWindow.postMessage({ api: 'duration' }, '*');
+          frame.contentWindow.postMessage(JSON.stringify({ api: 'duration' }), '*');
+          frame.contentWindow.postMessage('duration', '*');
+        } catch (_) {}
+      }
+
+      setCurrentTime((prev) => {
+        if (durationRef.current > 0 && prev >= durationRef.current) return prev;
+        return prev + 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isPlaying]);
+
   const handlePrevEpisode = () => {
     setActiveEpisode((prev) => {
       if (prev <= 1) return 1;
@@ -282,6 +535,31 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       return newEp;
     });
   };
+
+  // Seek relative (-10s / +10s)
+  const handleSeek = useCallback((deltaSeconds: number) => {
+    soundFx.playClick('nav');
+    const isRewind = deltaSeconds < 0;
+    const absDelta = Math.abs(deltaSeconds);
+
+    const curr = currentTimeRef.current;
+    const dur = durationRef.current;
+    let target = curr + deltaSeconds;
+    if (dur > 0) {
+      target = Math.min(dur, Math.max(0, target));
+    } else {
+      target = Math.max(0, target);
+    }
+
+    currentTimeRef.current = target;
+    setCurrentTime(target);
+
+    if (isRewind) {
+      sendEmbedMasterCommand('rewind', target, -absDelta);
+    } else {
+      sendEmbedMasterCommand('forward', target, absDelta);
+    }
+  }, [sendEmbedMasterCommand]);
 
   // Listen for BroadcastChannel commands from Remote Controller
   useEffect(() => {
@@ -323,7 +601,7 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
     });
 
     return () => unsubscribe();
-  }, [sendEmbedMasterCommand]);
+  }, [sendEmbedMasterCommand, handleSeek]);
 
   // Screen Wake Lock API and Background Sleep Prevention
   useEffect(() => {
@@ -414,14 +692,6 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       sendEmbedMasterCommand('play');
       setIsPlaying(true);
     }
-  };
-
-  // Seek relative (-10s / +10s)
-  const handleSeek = (deltaSeconds: number) => {
-    soundFx.playClick('nav');
-    const target = Math.max(0, currentTime + deltaSeconds);
-    setCurrentTime(target);
-    sendEmbedMasterCommand('seek', target);
   };
 
   // Scrubber change

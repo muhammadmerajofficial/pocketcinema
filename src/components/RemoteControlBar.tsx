@@ -102,12 +102,13 @@ export const RemoteControlBar: React.FC<RemoteControlBarProps> = ({
     return () => unsubscribe();
   }, []);
 
-  const sendPlayerCommand = (command: 'play' | 'pause' | 'seek' | 'mute' | 'unmute' | 'volume' | 'fullscreen' | 'prev_ep' | 'next_ep', value?: any) => {
+  const sendPlayerCommand = (command: 'play' | 'pause' | 'seek' | 'mute' | 'unmute' | 'volume' | 'fullscreen' | 'prev_ep' | 'next_ep' | 'rewind' | 'forward', value?: any, extra?: any) => {
     if (isLocked) return;
     syncManager.broadcast({
       type: 'PLAYER_COMMAND',
       command,
       value,
+      extra,
       timestamp: Date.now(),
     });
   };
@@ -140,10 +141,21 @@ export const RemoteControlBar: React.FC<RemoteControlBarProps> = ({
   // Remote Seek
   const handleRemoteSeekDelta = (delta: number) => {
     soundFx.playClick('nav');
-    const target = Math.max(0, playerStatus.currentTime + delta);
+    const isRewind = delta < 0;
+    const absDelta = Math.abs(delta);
+    let target = playerStatus.currentTime + delta;
+    if (playerStatus.duration > 0) {
+      target = Math.min(playerStatus.duration, Math.max(0, target));
+    } else {
+      target = Math.max(0, target);
+    }
     setPlayerStatus((prev) => ({ ...prev, currentTime: target }));
-    sendPlayerCommand('seek', target);
-    onPress(delta < 0 ? 'prev' : 'next');
+    if (isRewind) {
+      sendPlayerCommand('rewind', target, -absDelta);
+    } else {
+      sendPlayerCommand('forward', target, absDelta);
+    }
+    onPress(isRewind ? 'prev' : 'next');
   };
 
   // Remote Scrub

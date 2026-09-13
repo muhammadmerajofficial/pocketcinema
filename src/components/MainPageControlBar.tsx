@@ -140,7 +140,7 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
 
   // Dispatch player command to Firebase & BroadcastChannel
   const dispatchCommand = (
-    command: 'play' | 'pause' | 'seek' | 'volume' | 'mute' | 'unmute' | 'fullscreen' | 'stop',
+    command: 'play' | 'pause' | 'seek' | 'volume' | 'mute' | 'unmute' | 'fullscreen' | 'stop' | 'rewind' | 'forward',
     value?: any,
     extra?: any
   ) => {
@@ -250,9 +250,20 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
   // Rewind or Forward 10 seconds in real-time
   const handleSeekDelta = (deltaSeconds: number) => {
     soundFx.playClick('nav');
-    const target = Math.max(0, currentTime + deltaSeconds);
+    const isRewind = deltaSeconds < 0;
+    const absDelta = Math.abs(deltaSeconds);
+    let target = currentTime + deltaSeconds;
+    if (duration > 0) {
+      target = Math.min(duration, Math.max(0, target));
+    } else {
+      target = Math.max(0, target);
+    }
     setCurrentTime(target);
-    dispatchCommand('seek', target, deltaSeconds);
+    if (isRewind) {
+      dispatchCommand('rewind', target, -absDelta);
+    } else {
+      dispatchCommand('forward', target, absDelta);
+    }
   };
 
   // Stop playback on remote display in real-time
