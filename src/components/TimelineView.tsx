@@ -44,17 +44,17 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
       {/* Initial Loading Skeletons */}
       {isLoading && items.length === 0 && (
-        <div className="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 gap-2.5 sm:gap-3">
-          {Array.from({ length: 15 }).map((_, idx) => (
+        <div className="w-full grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6 gap-2 sm:gap-2.5 md:gap-3">
+          {Array.from({ length: 18 }).map((_, idx) => (
             <div
               key={`skeleton-${idx}`}
               className="flex flex-col rounded-xl overflow-hidden bg-zinc-900/60 border border-zinc-800 animate-pulse"
             >
               <div className="w-full aspect-[2/3] bg-zinc-800/80" />
-              <div className="p-3 flex flex-col gap-2">
-                <div className="h-4 bg-zinc-800 rounded w-3/4" />
-                <div className="h-3 bg-zinc-800/60 rounded w-1/2" />
-                <div className="h-3 bg-zinc-800/40 rounded w-full mt-1" />
+              <div className="p-2 sm:p-2.5 flex flex-col gap-1.5">
+                <div className="h-3.5 bg-zinc-800 rounded w-3/4" />
+                <div className="h-2.5 bg-zinc-800/60 rounded w-1/2" />
+                <div className="h-2 bg-zinc-800/40 rounded w-full mt-1" />
               </div>
             </div>
           ))}
@@ -74,12 +74,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         </div>
       )}
 
-      {/* 5-Column Edge-to-Edge Grid without wasted side spaces */}
+      {/* Responsive Grid: 6 columns on desktop, 3 columns on mobile */}
       {items.length > 0 && (
         <>
           <div 
-            id="media-5-column-grid"
-            className="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 gap-2.5 sm:gap-3"
+            id="media-responsive-grid"
+            className="w-full grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6 gap-2 sm:gap-2.5 md:gap-3"
           >
             {items.map((item, index) => {
               const isSelected = selectedIndex === index;
@@ -108,8 +108,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                 >
                   {/* Active Remote Indicator Pill */}
                   {isSelected && (
-                    <div className="absolute top-2 left-2 z-20 flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400 text-zinc-950 font-black text-[9px] tracking-wider uppercase shadow-md">
-                      <Radio className="w-2.5 h-2.5 animate-pulse text-zinc-950" />
+                    <div className="absolute top-1.5 left-1.5 sm:top-2 sm:left-2 z-20 flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-400 text-zinc-950 font-black text-[8px] sm:text-[9px] tracking-wider uppercase shadow-md">
+                      <Radio className="w-2 sm:w-2.5 h-2 sm:h-2.5 animate-pulse text-zinc-950" />
                       <span>TARGET</span>
                     </div>
                   )}
@@ -133,44 +133,44 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
                     {/* Central Play Badge on Hover */}
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
-                      <div className="w-11 h-11 rounded-full bg-amber-400 text-zinc-950 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.6)] transform group-hover:scale-110 transition-transform">
-                        <Play className="w-5 h-5 fill-zinc-950 ml-0.5" />
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-amber-400 text-zinc-950 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.6)] transform group-hover:scale-110 transition-transform">
+                        <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-zinc-950 ml-0.5" />
                       </div>
                     </div>
 
                     {/* Rating Badge */}
-                    <div className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-300 text-[11px] font-bold border border-white/10 shadow z-10">
-                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                    <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 flex items-center gap-0.5 sm:gap-1 px-1 sm:px-1.5 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-amber-300 text-[10px] sm:text-[11px] font-bold border border-white/10 shadow z-10">
+                      <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-amber-400 text-amber-400" />
                       <span>{item.rating.toFixed(1)}</span>
                     </div>
 
                     {/* Era / Release Year Badge */}
-                    <div className="absolute bottom-2 left-2 flex items-center gap-1.5 z-10">
-                      <span className="px-1.5 py-0.5 rounded bg-black/80 backdrop-blur-md text-[10px] font-mono font-bold text-amber-300 border border-amber-500/30">
+                    <div className="absolute bottom-1.5 left-1.5 sm:bottom-2 sm:left-2 flex items-center gap-1 z-10">
+                      <span className="px-1 sm:px-1.5 py-0.5 rounded bg-black/80 backdrop-blur-md text-[9px] sm:text-[10px] font-mono font-bold text-amber-300 border border-amber-500/30">
                         {item.year}
                       </span>
-                      <span className="px-1.5 py-0.5 rounded bg-black/75 text-[10px] text-zinc-300 font-medium truncate max-w-[80px]">
+                      <span className="hidden sm:inline px-1.5 py-0.5 rounded bg-black/75 text-[9px] sm:text-[10px] text-zinc-300 font-medium truncate max-w-[60px]">
                         {item.ageRating}
                       </span>
                     </div>
                   </div>
 
                   {/* Card Body Content */}
-                  <div className="p-2.5 sm:p-3 flex flex-col justify-between flex-1 gap-1.5">
+                  <div className="p-2 sm:p-2.5 md:p-3 flex flex-col justify-between flex-1 gap-1">
                     <div>
-                      <h3 className={`font-bold text-xs sm:text-sm line-clamp-1 leading-tight transition-colors ${
+                      <h3 className={`font-bold text-[11px] sm:text-xs md:text-sm line-clamp-1 leading-tight transition-colors ${
                         isSelected ? 'text-amber-300' : 'text-zinc-100 group-hover:text-amber-300'
                       }`}>
                         {item.title}
                       </h3>
-                      <p className="text-[11px] text-zinc-400 truncate mt-0.5">
+                      <p className="text-[10px] sm:text-[11px] text-zinc-400 truncate mt-0.5">
                         {item.directorOrStudio}
                       </p>
                     </div>
 
                     {/* Tags and Play/Info Action */}
-                    <div className="flex items-center justify-between text-[10px] text-zinc-400 pt-1 border-t border-zinc-800/60 mt-0.5">
-                      <span className="truncate max-w-[90px] text-zinc-400">
+                    <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-zinc-400 pt-1 border-t border-zinc-800/60 mt-0.5">
+                      <span className="truncate max-w-[75px] sm:max-w-[90px] text-zinc-400">
                         {item.genres[0] || 'Media'}
                       </span>
                       <button

@@ -108,9 +108,8 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const recognitionRef = useRef<any>(null);
 
-  // Count how many advanced filters are active (excluding default 'all' category)
+  // Count how many advanced filters are active (Country, Year, Genre, Language)
   const activeFilterCount = [
-    filters.category !== 'all' && filters.category !== '',
     Boolean(filters.country),
     Boolean(filters.year),
     Boolean(filters.genre),
@@ -232,16 +231,16 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
   };
 
   const getPlaceholderText = () => {
-    if (filters.category === 'movies' || (!filters.category && activeCategory === 'movies')) {
+    if (activeCategory === 'movies') {
       return 'Search movies by title, actor, director or keyword...';
     }
-    if (filters.category === 'tv' || (!filters.category && activeCategory === 'tv')) {
+    if (activeCategory === 'tv') {
       return 'Search TV shows by series title, network or creator...';
     }
-    if (filters.category === 'anime' || (!filters.category && activeCategory === 'anime')) {
+    if (activeCategory === 'anime') {
       return 'Search anime by title, studio, Japanese name or era...';
     }
-    return 'Search all movies, TV shows, and anime across genres...';
+    return 'Search movies, TV shows, and anime...';
   };
 
   // Helper for human-readable labels
@@ -376,22 +375,6 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
         <div id="active-filters-pill-bar" className="flex flex-wrap items-center gap-1.5 px-1 py-1 text-xs">
           <span className="text-zinc-500 text-[11px] font-medium mr-1">Active filters:</span>
 
-          {/* Category Pill */}
-          {filters.category && filters.category !== 'all' && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 font-medium">
-              <Film className="w-3 h-3 text-amber-400" />
-              <span className="capitalize">{filters.category}</span>
-              <button
-                type="button"
-                onClick={() => updateFilter('category', 'all')}
-                className="hover:text-white p-0.5 ml-0.5 cursor-pointer"
-                title="Remove category filter"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </span>
-          )}
-
           {/* Country Pill */}
           {filters.country && (
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 font-medium">
@@ -481,7 +464,7 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="w-4 h-4 text-amber-400" />
               <span className="font-bold text-sm text-zinc-100 tracking-wide">Advanced Search System</span>
-              <span className="text-[11px] text-zinc-400 hidden sm:inline">• Filter by Category, Country, Year, Genre & Language</span>
+              <span className="text-[11px] text-zinc-400 hidden sm:inline">• Filter by Country, Year, Genre & Language</span>
             </div>
             <div className="flex items-center gap-2">
               {activeFilterCount > 0 && (
@@ -505,35 +488,9 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
             </div>
           </div>
 
-          {/* 5 Filter Selectors Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-            {/* 1. Category Filter */}
-            <div id="filter-group-category" className="flex flex-col gap-1.5">
-              <label htmlFor="filter-select-category" className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
-                <Film className="w-3.5 h-3.5 text-amber-400" />
-                <span>Category</span>
-              </label>
-              <div className="relative">
-                <select
-                  id="filter-select-category"
-                  value={filters.category}
-                  onChange={(e) => updateFilter('category', e.target.value as any)}
-                  className={`w-full py-2 px-2.5 bg-zinc-900/90 border rounded-xl text-xs font-medium focus:outline-none transition-all cursor-pointer ${
-                    filters.category !== 'all' && filters.category !== ''
-                      ? 'border-amber-500/70 text-amber-300 ring-1 ring-amber-500/20'
-                      : 'border-zinc-800 text-zinc-200 focus:border-zinc-600'
-                  }`}
-                >
-                  {CATEGORY_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value} className="bg-zinc-900 text-zinc-100">
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* 2. Country Filter */}
+          {/* 4 Filter Selectors Grid (Country, Year, Genre, Language) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {/* 1. Country Filter */}
             <div id="filter-group-country" className="flex flex-col gap-1.5">
               <label htmlFor="filter-select-country" className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
                 <Globe className="w-3.5 h-3.5 text-cyan-400" />

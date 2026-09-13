@@ -51,7 +51,8 @@ export const LiveDisplayScreen: React.FC = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
-  const [isQROverlayOpen, setIsQROverlayOpen] = useState(true);
+  const [isQROverlayOpen, setIsQROverlayOpen] = useState(false);
+  const [isTvClosed, setIsTvClosed] = useState(false);
 
   // 1. Determine 4-digit roomCode:
   // Every time TV Screen opens anew, generate a fresh unique 4-digit code.
@@ -476,11 +477,34 @@ export const LiveDisplayScreen: React.FC = () => {
     };
   }, [playingItem]);
 
+  // Prevent browser back button or back navigation from returning to main page
+  useEffect(() => {
+    // Trap browser history so back button cannot navigate to main page
+    window.history.pushState({ tvScreen: true }, '', window.location.href);
+
+    const handlePopState = (e: PopStateEvent) => {
+      e.preventDefault();
+      closeRoom(roomCode);
+      setRoomStatus('closed');
+      setIsTvClosed(true);
+      try {
+        window.close();
+      } catch (_) {}
+      // Keep pushing state so browser never navigates back to main page
+      window.history.pushState({ tvScreen: true }, '', window.location.href);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [roomCode]);
+
   // Smart TV Remote D-Pad Navigation & Back key handling
   useEffect(() => {
     const unregister = registerTvDpadNavigation({
       onBack: () => {
-        setIsQROverlayOpen((prev) => !prev);
+        handleCloseTV();
       },
       onPlayPauseToggle: () => {
         setLatestCommand((prev) => ({
@@ -521,17 +545,44 @@ export const LiveDisplayScreen: React.FC = () => {
     soundFx.playClick('switch');
     closeRoom(roomCode);
     setRoomStatus('closed');
+    setIsTvClosed(true);
     try {
       window.close();
     } catch (_) {}
-    setTimeout(() => {
-      const u = new URL(window.location.href);
-      u.searchParams.delete('view');
-      u.searchParams.delete('room');
-      u.searchParams.delete('code');
-      window.location.href = u.toString() || '/';
-    }, 150);
   };
+
+  if (isTvClosed) {
+    return (
+      <div 
+        id="tv-closed-screen" 
+        className="fixed inset-0 w-screen h-screen bg-black flex flex-col items-center justify-center text-zinc-400 font-sans select-none z-[99999]"
+        style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}
+      >
+        <div className="p-8 rounded-3xl bg-zinc-950/95 border border-zinc-800/90 shadow-[0_10px_50px_rgba(0,0,0,0.95)] flex flex-col items-center gap-4 text-center max-w-sm mx-4">
+          <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-red-400">
+            <Power className="w-8 h-8 text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-white tracking-wide">TV SCREEN CLOSED</h2>
+            <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+              Playback has ended and this TV session is disconnected. You can safely close this window.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                window.close();
+              } catch (_) {}
+            }}
+            className="w-full mt-2 py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 hover:text-white text-xs font-bold transition-all cursor-pointer"
+          >
+            Close Window
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const isConnected = roomStatus === 'connected';
   const remotePageUrl = getRemoteUrl();
@@ -541,10 +592,6 @@ export const LiveDisplayScreen: React.FC = () => {
     <div
       ref={containerRef}
       id="live-display-screen"
-      onMouseMove={triggerTouchActivity}
-      onTouchStart={triggerTouchActivity}
-      onClick={triggerTouchActivity}
-      onDoubleClick={toggleFullscreen}
       className="fixed inset-0 w-screen h-screen min-h-screen overflow-hidden bg-black text-white m-0 p-0 z-50 select-none font-sans"
       style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}
     >
@@ -557,8 +604,7 @@ export const LiveDisplayScreen: React.FC = () => {
         pairingCode={roomCode}
         latestCommand={latestCommand}
         onExit={() => {
-          closeRoom(roomCode);
-          setPlayingItem(null);
+          handleCloseTV();
         }}
       />
 
@@ -877,12 +923,45 @@ export const LiveDisplayScreen: React.FC = () => {
         />
       )}
 
+      {/* 6.5 Full-Screen Transparent Click Lock Shield */}
+      {/* Intercepts and locks out all clicks/touches anywhere on TV screen so that ONLY the player control dock works */}
+      <div
+        id="tv-screen-click-lock-shield"
+        className="fixed inset-0 w-screen h-screen z-[10001] bg-transparent pointer-events-auto select-none cursor-default"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onMouseUp={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onTouchEnd={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      />
+
       {/* 7. Direct Touch & Mouse Quick Floating On-Screen Controls */}
       <div 
         id="tv-onscreen-touch-dock"
-        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[10004] transition-all duration-300 flex items-center gap-2 p-2 rounded-2xl bg-black/85 backdrop-blur-xl border border-zinc-800 shadow-[0_10px_40px_rgba(0,0,0,0.85)] ${
-          showTouchDock ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'
-        }`}
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[10010] transition-all duration-300 flex items-center gap-2 p-2 rounded-2xl bg-black/90 backdrop-blur-xl border border-zinc-800 shadow-[0_10px_40px_rgba(0,0,0,0.85)] opacity-100 translate-y-0 pointer-events-auto"
       >
         {/* Rewind 10s */}
         <button
@@ -891,7 +970,6 @@ export const LiveDisplayScreen: React.FC = () => {
             e.stopPropagation();
             soundFx.playClick('nav');
             setLatestCommand({ command: 'seek', extra: -10, timestamp: Date.now() });
-            triggerTouchActivity();
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
           title="Rewind 10s"
@@ -909,7 +987,6 @@ export const LiveDisplayScreen: React.FC = () => {
               command: prev?.command === 'play' ? 'pause' : 'play',
               timestamp: Date.now(),
             }));
-            triggerTouchActivity();
           }}
           className="interactive-element px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center gap-2 cursor-pointer transition-all active:scale-95 shadow-md shadow-amber-500/20"
           title="Play/Pause"
@@ -934,7 +1011,6 @@ export const LiveDisplayScreen: React.FC = () => {
             e.stopPropagation();
             soundFx.playClick('nav');
             setLatestCommand({ command: 'seek', extra: 10, timestamp: Date.now() });
-            triggerTouchActivity();
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
           title="Forward 10s"
@@ -953,7 +1029,6 @@ export const LiveDisplayScreen: React.FC = () => {
             const nextVol = Math.max(0, volume - 10);
             setVolume(nextVol);
             setLatestCommand({ command: 'volume', value: nextVol, timestamp: Date.now() });
-            triggerTouchActivity();
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
           title="Volume Down (-10%)"
@@ -970,7 +1045,6 @@ export const LiveDisplayScreen: React.FC = () => {
             const nextVol = Math.min(100, volume + 10);
             setVolume(nextVol);
             setLatestCommand({ command: 'volume', value: nextVol, timestamp: Date.now() });
-            triggerTouchActivity();
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
           title="Volume Up (+10%)"
@@ -985,7 +1059,6 @@ export const LiveDisplayScreen: React.FC = () => {
             e.stopPropagation();
             soundFx.playClick('switch');
             setIsQROverlayOpen((prev) => !prev);
-            triggerTouchActivity();
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-amber-400 hover:text-amber-300 cursor-pointer transition-all active:scale-95"
           title={isQROverlayOpen ? 'Hide Pairing Code' : 'Show Pairing Code'}
@@ -999,12 +1072,26 @@ export const LiveDisplayScreen: React.FC = () => {
           onClick={(e) => {
             e.stopPropagation();
             toggleFullscreen();
-            triggerTouchActivity();
           }}
           className="interactive-element p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-white cursor-pointer transition-all active:scale-95"
           title="Toggle Fullscreen"
         >
           {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+        </button>
+
+        <div className="h-6 w-px bg-zinc-700/60 mx-1" />
+
+        {/* Close TV Screen */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCloseTV();
+          }}
+          className="interactive-element p-2.5 rounded-xl bg-red-950/80 hover:bg-red-900 text-red-400 hover:text-red-300 border border-red-500/30 cursor-pointer transition-all active:scale-95"
+          title="Close TV Screen"
+        >
+          <Power className="w-5 h-5" />
         </button>
       </div>
     </div>

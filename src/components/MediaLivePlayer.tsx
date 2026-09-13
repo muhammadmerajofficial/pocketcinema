@@ -31,107 +31,16 @@ import { MediaItem } from '../types';
 import { soundFx } from '../utils/sound';
 import { TMDB_API_KEY } from '../services/api';
 import { syncManager, SyncMessage } from '../utils/syncChannel';
+import {
+  ALL_PLAYER_SERVERS,
+  PlayerServer,
+  PlayerOptions,
+  formatEmbedMasterId,
+  buildEmbedMasterQuery
+} from '../utils/servers';
 
-export interface PlayerServer {
-  id: string;
-  name: string;
-  getMovieUrl: (id: string, options?: PlayerOptions) => string;
-  getTvUrl: (id: string, s: number, e: number, options?: PlayerOptions) => string;
-  getAnimeUrl: (id: string, s: number, e: number, options?: PlayerOptions) => string;
-}
-
-export interface PlayerOptions {
-  skin?: 'onyx' | 'aurora';
-  welcomePage?: 'on' | 'off';
-  autoplay?: 'on' | 'off';
-  subUrl?: string;
-  subLabel?: string;
-}
-
-export function formatEmbedMasterId(rawId: string | number): string {
-  const str = String(rawId).trim();
-  if (str.startsWith('tt')) {
-    return str;
-  }
-  const match = str.match(/tt\d+/);
-  if (match) return match[0];
-  const numMatch = str.match(/\d+/);
-  return numMatch ? numMatch[0] : str;
-}
-
-function buildEmbedMasterQuery(opts?: PlayerOptions): string {
-  const skin = opts?.skin || 'onyx';
-  const welcome = opts?.welcomePage || 'off';
-  const autoplay = opts?.autoplay || 'on';
-  let q = `?skin=${encodeURIComponent(skin)}&welcome_page=${encodeURIComponent(welcome)}&autoplay=${encodeURIComponent(autoplay)}`;
-  if (opts?.subUrl && opts?.subUrl.trim()) {
-    q += `&sub_url[]=${encodeURIComponent(opts.subUrl.trim())}`;
-    if (opts?.subLabel && opts?.subLabel.trim()) {
-      q += `&sub_label[]=${encodeURIComponent(opts.subLabel.trim())}`;
-    }
-  }
-  return q;
-}
-
-// Player servers with EmbedMaster as #1 (Primary & Default)
-export const ALL_PLAYER_SERVERS: PlayerServer[] = [
-  {
-    id: 'embedmaster',
-    name: 'EmbedMaster.link (Official)',
-    getMovieUrl: (id, opts) => `https://embedmaster.link/movie/${formatEmbedMasterId(id)}${buildEmbedMasterQuery(opts)}`,
-    getTvUrl: (id, s, e, opts) => `https://embedmaster.link/tv/${formatEmbedMasterId(id)}/${s}/${e}${buildEmbedMasterQuery(opts)}`,
-    getAnimeUrl: (id, s, e, opts) => `https://embedmaster.link/tv/${formatEmbedMasterId(id)}/${s}/${e}${buildEmbedMasterQuery(opts)}`,
-  },
-  {
-    id: 'cinemaos-in',
-    name: 'CinemaOS.in',
-    getMovieUrl: (id) => `https://cinemaos.in/movie/watch/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://cinemaos.in/tv/watch/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://cinemaos.in/tv/watch/${formatEmbedMasterId(id)}/${s}/${e}`,
-  },
-  {
-    id: 'peachify',
-    name: 'Peachify.top',
-    getMovieUrl: (id) => `https://peachify.top/embed/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://peachify.top/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://peachify.top/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-  },
-  {
-    id: 'boredflix',
-    name: 'BoredFlix.cc',
-    getMovieUrl: (id) => `https://boredflix.cc/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://boredflix.cc/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://boredflix.cc/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-  },
-  {
-    id: 'vidrock',
-    name: 'VidRock.ru',
-    getMovieUrl: (id) => `https://vidrock.ru/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://vidrock.ru/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://vidrock.ru/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-  },
-  {
-    id: 'vidsrc',
-    name: 'VidSrc.tw',
-    getMovieUrl: (id) => `https://vidsrc.tw/embed/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://vidsrc.tw/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://vidsrc.tw/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-  },
-  {
-    id: 'vidlove',
-    name: 'VidLove.cc',
-    getMovieUrl: (id) => `https://player.vidlove.cc/embed/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://player.vidlove.cc/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://player.vidlove.cc/embed/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-  },
-  {
-    id: 'vidspark',
-    name: 'VidSpark.to',
-    getMovieUrl: (id) => `https://vidspark.to/movie/${formatEmbedMasterId(id)}`,
-    getTvUrl: (id, s, e) => `https://vidspark.to/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-    getAnimeUrl: (id, s, e) => `https://vidspark.to/tv/${formatEmbedMasterId(id)}/${s}/${e}`,
-  },
-];
+export type { PlayerServer, PlayerOptions };
+export { formatEmbedMasterId };
 
 interface MediaLivePlayerProps {
   item: MediaItem;
@@ -388,6 +297,12 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
         } else if (command === 'seek') {
           sendEmbedMasterCommand('seek', value);
           if (typeof value === 'number') setCurrentTime(value);
+        } else if (command === 'rewind') {
+          const delta = typeof (msg as any).extra === 'number' ? (msg as any).extra : -10;
+          handleSeek(delta);
+        } else if (command === 'forward') {
+          const delta = typeof (msg as any).extra === 'number' ? (msg as any).extra : 10;
+          handleSeek(delta);
         } else if (command === 'mute') {
           sendEmbedMasterCommand('mute');
           setIsMuted(true);
@@ -984,41 +899,59 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       )}
 
       {/* 2. FULL SCREEN PLAYER ONLY (100% UNTOUCHED, NO OVERLAYS ON TOP OF VIDEO) */}
-      <div 
-        id="embedmaster-player-stage"
-        className={`w-full relative bg-black overflow-hidden shadow-2xl border-2 border-zinc-800/90 ${
-          isFullScreenMode 
-            ? 'flex-1 rounded-none border-none' 
-            : 'aspect-video rounded-2xl sm:rounded-3xl'
-        }`}
-      >
-        {/* Loading spinner while iframe connects */}
-        {isIframeLoading && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-zinc-950/95 backdrop-blur-sm pointer-events-none">
-            <div className="relative">
-              <div className="w-14 h-14 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" />
-              <Play className="w-6 h-6 text-amber-400 absolute inset-0 m-auto" />
-            </div>
-            <span className="text-xs font-mono text-zinc-400">
-              Loading {item.title} on {currentServer.name}...
-            </span>
+      {isPlayerHidden ? (
+        <div 
+          onClick={onToggleHide}
+          className="w-full py-3.5 px-4 rounded-2xl bg-zinc-950/90 border border-amber-500/30 flex items-center justify-between text-xs cursor-pointer hover:border-amber-400 transition-all shadow-md"
+          title="Click to expand player"
+        >
+          <div className="flex items-center gap-2 text-zinc-300">
+            <Play className="w-4 h-4 text-amber-400 fill-amber-400" />
+            <span className="font-bold text-white truncate max-w-[200px] sm:max-w-md">{item.title}</span>
+            <span className="text-zinc-500 font-mono text-[11px] hidden sm:inline">(Player minimized)</span>
           </div>
-        )}
+          <span className="text-amber-400 font-bold hover:underline flex items-center gap-1">
+            <Eye className="w-3.5 h-3.5" />
+            <span>Show Video</span>
+          </span>
+        </div>
+      ) : (
+        <div 
+          id="embedmaster-player-stage"
+          className={`w-full relative bg-black overflow-hidden shadow-2xl border-2 border-zinc-800/90 ${
+            isFullScreenMode 
+              ? 'flex-1 rounded-none border-none' 
+              : 'aspect-video rounded-2xl sm:rounded-3xl'
+          }`}
+        >
+          {/* Loading spinner while iframe connects */}
+          {isIframeLoading && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-zinc-950/95 backdrop-blur-sm pointer-events-none">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" />
+                <Play className="w-6 h-6 text-amber-400 absolute inset-0 m-auto" />
+              </div>
+              <span className="text-xs font-mono text-zinc-400">
+                Loading {item.title} on {currentServer.name}...
+              </span>
+            </div>
+          )}
 
-        {/* The EmbedMaster iframe: 100% width, 100% height, full screen player */}
-        <iframe
-          id="embedmaster_iframe"
-          ref={iframeRef}
-          key={`${playerUrl}-${activeSeason}-${activeEpisode}`}
-          src={playerUrl}
-          title={`${item.title} EmbedMaster Player`}
-          className="w-full h-full border-0 absolute inset-0 block"
-          allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *"
-          allowFullScreen
-          referrerPolicy="origin"
-          onLoad={() => setIsIframeLoading(false)}
-        />
-      </div>
+          {/* The EmbedMaster iframe: 100% width, 100% height, full screen player */}
+          <iframe
+            id="embedmaster_iframe"
+            ref={iframeRef}
+            key={`${playerUrl}-${activeSeason}-${activeEpisode}`}
+            src={playerUrl}
+            title={`${item.title} EmbedMaster Player`}
+            className="w-full h-full border-0 absolute inset-0 block"
+            allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *"
+            allowFullScreen
+            referrerPolicy="origin"
+            onLoad={() => setIsIframeLoading(false)}
+          />
+        </div>
+      )}
 
       {/* 3. DEDICATED SEPARATE BOTTOM CONTROL BAR ("player control bar alada thakbe niche") */}
       <div 

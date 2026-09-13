@@ -15,7 +15,9 @@ export interface PlayerServer {
 }
 
 const STATIC_ID_MAP: Record<string, string> = {
+  'm-dune-2': '693134',
   'm-dune2': '693134',
+  'm-furiosa': '786892',
   'm-oppenheimer': '872585',
   'm-spider-verse': '569094',
   'm-batman': '414906',

@@ -19,7 +19,9 @@ import {
   RefreshCw,
   QrCode,
   Copy,
-  Check
+  Check,
+  Lock,
+  Power
 } from 'lucide-react';
 import { CategoryType, MediaItem, AdvancedSearchFilters } from './types';
 import { MEDIA_COLLECTION } from './data/mediaData';
@@ -34,6 +36,7 @@ import { MainPageControlBar } from './components/MainPageControlBar';
 import { ConnectedRemotePanel } from './components/ConnectedRemotePanel';
 import { QRScannerModal } from './components/QRScannerModal';
 import { LiveDisplayScreen } from './components/LiveDisplayScreen';
+import { MediaLivePlayer } from './components/MediaLivePlayer';
 import { soundFx } from './utils/sound';
 import { syncManager, SyncMessage } from './utils/syncChannel';
 import { 
@@ -132,7 +135,8 @@ export default function App() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeModalItem, setActiveModalItem] = useState<MediaItem | null>(null);
-  const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(null);
+  const [playingMedia, setPlayingMedia] = useState<MediaItem | null>(() => MEDIA_COLLECTION[0]);
+  const [isPlayerDismissed, setIsPlayerDismissed] = useState(false);
   const [isPlayerHidden, setIsPlayerHidden] = useState(false);
   const [isScreenLocked, setIsScreenLocked] = useState(false);
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
@@ -435,6 +439,7 @@ export default function App() {
     if (isScreenLocked) return;
     soundFx.playClick('ok');
     setPlayingMedia(item);
+    setIsPlayerDismissed(false);
     setIsPlayerHidden(false);
     setIsRemotePlaying(true);
     setRemoteVolume(100);
@@ -651,6 +656,7 @@ export default function App() {
   const handleCloseSession = () => {
     soundFx.playClick('switch');
     setPlayingMedia(null);
+    setIsPlayerDismissed(true);
     setIsRemotePlaying(false);
     syncManager.broadcast({ type: 'CLOSE_PLAYER' });
     const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
@@ -670,13 +676,14 @@ export default function App() {
       closeRoom(pairingCode);
     }
     setPairingCode('');
-    setPlayingMedia(null);
+    setIsPlayerDismissed(true);
+    setIsPlayerHidden(false);
     setIsRemotePlaying(false);
     setMainPageConnectFeedback({
       success: true,
-      msg: 'Disconnected from TV Display.'
+      msg: 'TV Disconnected. Click "Open Player" to open the in-page player!'
     });
-    setTimeout(() => setMainPageConnectFeedback(null), 3000);
+    setTimeout(() => setMainPageConnectFeedback(null), 3500);
   };
 
   // Category item count cache
@@ -904,46 +911,46 @@ export default function App() {
       className="min-h-screen bg-[#08080c] text-zinc-100 flex flex-col font-sans selection:bg-amber-500 selection:text-black"
     >
       {/* 1. TOP STATUS & NAVIGATION BAR */}
-      <header className="sticky top-0 z-40 bg-[#0c0d12]/90 backdrop-blur-md border-b border-zinc-800/80 px-3 py-2.5 sm:px-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
+      <header className="sticky top-0 z-40 bg-[#0c0d12]/90 backdrop-blur-md border-b border-zinc-800/80 px-2 sm:px-6 py-2 sm:py-2.5">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-1.5 sm:gap-3">
           {/* Status Logo Indicator (Name removed per user request) */}
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="p-1.5 sm:p-2 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 text-black shadow-lg shadow-amber-500/20">
-              <Radio className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="p-1 sm:p-2 rounded-lg sm:rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 text-black shadow-lg shadow-amber-500/20">
+              <Radio className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-[2.5]" />
             </div>
           </div>
 
-          {/* Header Controls: TV Code Display + Room Code Input + Active Button + Camera QR + TV Player + Sound */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Header Controls: TV Code Display + Room Code Input + Active/Disconnect Button + Camera QR + TV Player */}
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
             {/* TV Screen Code Box / Button directly BEFORE the code input box */}
             {tvScreenCode ? (
               <button
                 id="header-tv-screen-code-btn"
                 type="button"
                 onClick={handleTvCodeBoxClick}
-                className={`group flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all cursor-pointer shadow-sm focus:outline-none ${
+                className={`group flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-xl border text-[11px] sm:text-xs font-mono font-bold transition-all cursor-pointer shadow-sm focus:outline-none shrink-0 ${
                   pairingCode && pairingCode === tvScreenCode
                     ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-400 hover:bg-emerald-900/60 shadow-emerald-950/50 ring-1 ring-emerald-500/30'
                     : 'bg-zinc-900/95 hover:bg-zinc-800 border-amber-500/40 hover:border-amber-400 text-amber-400 hover:text-amber-300'
                 }`}
                 title={`TV Screen Code: #${tvScreenCode} (Matches TV Screen • Click to auto-fill & activate)`}
               >
-                <Tv2 className={`w-3.5 h-3.5 shrink-0 ${pairingCode && pairingCode === tvScreenCode ? 'text-emerald-400' : 'text-amber-400 group-hover:scale-110 transition-transform'}`} />
-                <span className="text-[10px] uppercase font-sans font-semibold text-zinc-400 hidden xs:inline">TV:</span>
-                <span className="font-black tracking-wider text-xs sm:text-sm">
+                <Tv2 className={`w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 ${pairingCode && pairingCode === tvScreenCode ? 'text-emerald-400' : 'text-amber-400 group-hover:scale-110 transition-transform'}`} />
+                <span className="text-[9px] sm:text-[10px] uppercase font-sans font-semibold text-zinc-400 hidden xs:inline">TV:</span>
+                <span className="font-black tracking-wider text-[11px] sm:text-sm">
                   #{tvScreenCode}
                 </span>
                 {pairingCode && pairingCode === tvScreenCode ? (
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse shrink-0" title="Connected & Active" />
                 ) : copiedTvCode ? (
-                  <Check className="w-3 h-3 text-emerald-400 shrink-0" title="Copied & Activated" />
+                  <Check className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-400 shrink-0" title="Copied & Activated" />
                 ) : (
-                  <Copy className="w-3 h-3 text-zinc-500 group-hover:text-amber-300 transition-colors shrink-0" title="Click to auto-fill & activate" />
+                  <Copy className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-zinc-500 group-hover:text-amber-300 transition-colors shrink-0" title="Click to auto-fill & activate" />
                 )}
               </button>
             ) : null}
 
-            {/* Room code input box & active button directly before camera icon */}
+            {/* Room code input box & Active/Disconnect toggle button on the SAME button */}
             <form onSubmit={handleMainPageConnect} className="flex items-center gap-1 sm:gap-1.5">
               <input
                 id="header-room-code-input"
@@ -953,35 +960,41 @@ export default function App() {
                 value={mainPageCodeInput}
                 onChange={(e) => setMainPageCodeInput(e.target.value.replace(/[^0-9]/g, ''))}
                 placeholder="Code"
-                className={`w-14 sm:w-18 text-center font-mono text-xs font-bold py-1.5 px-1 sm:px-2 bg-zinc-900 border rounded-xl placeholder:text-zinc-600 focus:outline-none transition-all ${
+                className={`w-11 xs:w-13 sm:w-18 text-center font-mono text-[11px] sm:text-xs font-bold py-1 sm:py-1.5 px-1 sm:px-2 bg-zinc-900 border rounded-xl placeholder:text-zinc-600 focus:outline-none transition-all ${
                   pairingCode && pairingCode === mainPageCodeInput
                     ? 'border-emerald-500/60 ring-1 ring-emerald-500/30 text-emerald-400'
                     : 'border-zinc-800 focus:border-amber-500/60 text-amber-400'
                 }`}
                 title="Enter 4-digit TV room code"
               />
-              <button
-                id="header-room-active-btn"
-                type="submit"
-                disabled={isConnectingMainPage || mainPageCodeInput.trim().length !== 4}
-                className={`px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm ${
-                  pairingCode && pairingCode === mainPageCodeInput
-                    ? 'bg-emerald-500 hover:bg-emerald-400 text-black'
-                    : 'bg-amber-500 hover:bg-amber-400 text-black disabled:opacity-40 disabled:cursor-not-allowed'
-                }`}
-                title={pairingCode && pairingCode === mainPageCodeInput ? 'Room is Active' : 'Activate TV Room'}
-              >
-                {isConnectingMainPage ? (
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                ) : (
-                  <>
-                    {pairingCode && pairingCode === mainPageCodeInput && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-black animate-pulse" />
-                    )}
+              {pairingCode ? (
+                /* When TV is active/connected: The button shows "Disconnect" inside the same button! */
+                <button
+                  id="header-room-disconnect-btn"
+                  type="button"
+                  onClick={handleDisconnectRemote}
+                  className="px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-[10px] xs:text-[11px] sm:text-xs font-bold flex items-center gap-1 bg-red-600 hover:bg-red-500 text-white cursor-pointer shadow-sm transition-all active:scale-95 shrink-0"
+                  title="Disconnect TV Screen (Toggles back to Active)"
+                >
+                  <Power className="w-3 h-3 text-white shrink-0" />
+                  <span>Disconnect</span>
+                </button>
+              ) : (
+                /* When TV is not connected: The button shows "Active" */
+                <button
+                  id="header-room-active-btn"
+                  type="submit"
+                  disabled={isConnectingMainPage || mainPageCodeInput.trim().length !== 4}
+                  className="px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-[10px] xs:text-[11px] sm:text-xs font-bold flex items-center gap-1 bg-amber-500 hover:bg-amber-400 text-black disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-sm transition-all active:scale-95 shrink-0"
+                  title="Activate TV Room"
+                >
+                  {isConnectingMainPage ? (
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                  ) : (
                     <span>Active</span>
-                  </>
-                )}
-              </button>
+                  )}
+                </button>
+              )}
             </form>
 
             {/* Scan QR Code Button (Camera icon) */}
@@ -992,14 +1005,14 @@ export default function App() {
                 soundFx.playClick('switch');
                 setIsQRScannerOpen(true);
               }}
-              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+              className="p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all shrink-0"
               title="Scan TV Screen QR Code with Camera"
             >
-              <Camera className="w-4 h-4" />
+              <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               <span className="hidden md:inline">Scan QR</span>
             </button>
 
-            {/* Open TV Display View in New Tab */}
+            {/* Open TV Display View: Only TV icon on mobile to save space, text & external icon on PC */}
             <a
               id="header-tv-player-btn"
               href={tvDisplayUrl}
@@ -1010,54 +1023,154 @@ export default function App() {
                 soundFx.playClick('ok');
                 const freshCode = generate4DigitRoomCode();
                 
-                // Only populate code into remote if remote is not already paired to an active TV
-                if (!pairingCodeRef.current) {
-                  setTvScreenCode(freshCode);
-                  setMainPageCodeInput(freshCode);
-                  try {
-                    localStorage.setItem('active_tv_screen_code', freshCode);
-                  } catch (_) {}
-                }
+                // Pair this remote to that TV screen code right away so that TV connect locks the main player
+                setTvScreenCode(freshCode);
+                setMainPageCodeInput(freshCode);
+                try {
+                  localStorage.setItem('active_tv_screen_code', freshCode);
+                } catch (_) {}
                 publishActiveTvRoom(freshCode);
+                handleConnectRoomCode(freshCode);
 
                 const targetUrl = getTvDisplayUrlWithCode(freshCode);
                 window.open(targetUrl, '_blank', 'noopener,noreferrer');
               }}
-              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all shrink-0"
               title="Open TV Screen in a new tab"
             >
-              <Tv2 className="w-4 h-4 text-amber-400" />
+              <Tv2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
               <span className="hidden md:inline">TV Screen</span>
-              <ExternalLink className="w-3 h-3 text-amber-400/80" />
+              <ExternalLink className="w-3 h-3 text-amber-400/80 hidden md:inline shrink-0" />
             </a>
           </div>
         </div>
-
-        {/* Connection Feedback Banner */}
-        {mainPageConnectFeedback && (
-          <div 
-            className={`mt-2 max-w-7xl mx-auto p-2 rounded-xl text-xs flex items-center justify-between gap-2 animate-fadeIn ${
-              mainPageConnectFeedback.success
-                ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300'
-                : 'bg-red-950/40 border border-red-500/40 text-red-300'
-            }`}
-          >
-            <span>{mainPageConnectFeedback.msg}</span>
-            <button 
-              type="button" 
-              onClick={() => setMainPageConnectFeedback(null)}
-              className="text-zinc-400 hover:text-white p-0.5 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
       </header>
 
       {/* 3. MAIN CONTENT CONTAINER */}
       <div className={`max-w-7xl mx-auto w-full px-4 sm:px-6 py-4 flex-1 flex flex-col gap-4 transition-all ${
-        pairingCode || playingMedia ? 'pb-16 sm:pb-20' : 'pb-12'
+        pairingCode || (playingMedia && !isPlayerDismissed) ? 'pb-16 sm:pb-20' : 'pb-12'
       }`}>
+        {/* If TV Screen is Connected: Lock Main Page Player ("tv connect korle tkhon main page a player lock thakbe mane open kora jabe na") */}
+        {pairingCode ? (
+          <div 
+            id="main-page-tv-connected-locked-banner"
+            className="w-full rounded-2xl bg-zinc-950/90 border border-emerald-500/40 p-3 sm:p-4 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn mb-1"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 sm:p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                <Tv2 className="w-5 h-5" />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">
+                    TV Screen Connected • Room #{pairingCode}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-mono text-amber-300 font-bold flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-amber-400" />
+                    <span>Main Player Locked</span>
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-300 font-medium mt-1">
+                  Streaming <span className="text-amber-300 font-bold">{playingMedia?.title || 'Selected Title'}</span> directly on TV display.
+                </p>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  Main page player is locked while TV is active. Click Disconnect in top bar to unlock.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              {/* UNCLICKABLE Open Player button when TV page is active */}
+              <button
+                type="button"
+                disabled={true}
+                className="px-3.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-500 font-bold text-xs flex items-center gap-1.5 cursor-not-allowed opacity-50 select-none pointer-events-none transition-none shadow-none"
+                title="TV page is active. Player is locked and unclickable. Click Disconnect in header to unlock."
+              >
+                <Lock className="w-3.5 h-3.5 text-zinc-500" />
+                <span>Open Player</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ONLY WHEN TV IS NOT CONNECTED: Main page player operates normally! ("sudu matro tv screen page connect na thaklei main page er player a sob kichu colbe") */
+          <>
+            {(playingMedia || (mediaItems && mediaItems.length > 0)) && !isPlayerDismissed && (
+              <section 
+                id="main-page-cinema-player-section" 
+                className="w-full flex flex-col items-center animate-fadeIn mb-1"
+              >
+                <MediaLivePlayer
+                  item={playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0]}
+                  onClose={() => {
+                    soundFx.playClick('switch');
+                    setIsPlayerDismissed(true);
+                  }}
+                  isPlayerHidden={isPlayerHidden}
+                  onToggleHide={() => setIsPlayerHidden((prev) => !prev)}
+                  isLocked={isScreenLocked}
+                  onToggleLock={() => setIsScreenLocked((prev) => !prev)}
+                  currentServerIndex={playerServerIndex}
+                  currentSeason={playerSeason}
+                  currentEpisode={playerEpisode}
+                  onPlayerConfigChange={(cfg) => {
+                    setPlayerServerIndex(cfg.serverIndex);
+                    setPlayerSeason(cfg.season);
+                    setPlayerEpisode(cfg.episode);
+                  }}
+                  onNextTrack={() => {
+                    if (mediaItems.length > 0) {
+                      const nextIdx = (selectedIndex + 1) % mediaItems.length;
+                      setSelectedIndex(nextIdx);
+                      handlePlayMedia(mediaItems[nextIdx], 1, 1);
+                    }
+                  }}
+                  onPrevTrack={() => {
+                    if (mediaItems.length > 0) {
+                      const prevIdx = (selectedIndex - 1 + mediaItems.length) % mediaItems.length;
+                      setSelectedIndex(prevIdx);
+                      handlePlayMedia(mediaItems[prevIdx], 1, 1);
+                    }
+                  }}
+                />
+              </section>
+            )}
+
+            {/* Minimized / Re-open Bar when dismissed */}
+            {isPlayerDismissed && (
+              <div 
+                id="reopen-cinema-player-banner"
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-zinc-950/90 border border-zinc-800 hover:border-amber-500/40 transition-all text-xs shadow-md"
+              >
+                <div className="flex items-center gap-2.5 text-zinc-300">
+                  <div className="p-1.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    <Tv2 className="w-4 h-4" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-white">Cinema Player is docked</span>
+                    <span className="text-zinc-500 text-[11px]">Click to open or select any title from the list below</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundFx.playClick('ok');
+                    setIsPlayerDismissed(false);
+                    setIsPlayerHidden(false);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs cursor-pointer transition-all active:scale-95 shadow-sm"
+                >
+                  Open Player
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
         {/* Category Navigation (Movies, TV Shows, Anime) in 1 clean line */}
         <RemoteTopNav
           activeCategory={activeCategory}
@@ -1068,11 +1181,10 @@ export default function App() {
             soundFx.playClick('switch');
             autoPlayCategoryChangeRef.current = true;
             if (cat === activeCategory) {
-              fetchInitialMedia(cat, searchQuery, true, { ...advancedFilters, category: cat });
+              fetchInitialMedia(cat, searchQuery, true, advancedFilters);
             } else {
               setActiveCategory(cat);
               setSearchQuery('');
-              setAdvancedFilters((prev) => ({ ...prev, category: cat }));
             }
           }}
         />

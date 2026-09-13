@@ -40,9 +40,9 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-// Suppress transient backend connection retry warnings
+// Suppress internal Firestore connection retry & network warnings in sandbox iframe
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch (_) {}
 
 export const db = (() => {
@@ -53,7 +53,7 @@ export const db = (() => {
   try {
     return initializeFirestore(app, {
       ignoreUndefinedProperties: true,
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
     }, dbId);
   } catch {
     return dbId ? getFirestore(app, dbId) : getFirestore(app);
