@@ -25,6 +25,7 @@ import {
   Subtitles,
   Activity,
   ArrowRight,
+  ArrowLeft,
   Tv2
 } from 'lucide-react';
 import { MediaItem } from '../types';
@@ -38,6 +39,7 @@ import {
   formatEmbedMasterId,
   buildEmbedMasterQuery
 } from '../utils/servers';
+import { popupManager } from '../utils/popupManager';
 
 export type { PlayerServer, PlayerOptions };
 export { formatEmbedMasterId };
@@ -139,6 +141,7 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
   const [duration, setDuration] = useState<number>(0);
   const [volume, setVolume] = useState<number>(100);
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [customMinutes, setCustomMinutes] = useState<string>('');
   const [lastEvent, setLastEvent] = useState<string>('Ready');
   const [eventTime, setEventTime] = useState<number>(Date.now());
 
@@ -561,6 +564,33 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
     }
   }, [sendEmbedMasterCommand]);
 
+  // Play directly from user-entered custom minutes
+  const handleCustomMinutePlay = () => {
+    const mins = parseFloat(customMinutes);
+    if (isNaN(mins) || mins < 0) return;
+    soundFx.playClick('ok');
+    const targetSeconds = mins * 60;
+
+    currentTimeRef.current = targetSeconds;
+    setCurrentTime(targetSeconds);
+    setIsPlaying(true);
+
+    sendEmbedMasterCommand('seek', targetSeconds);
+    sendEmbedMasterCommand('play');
+
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'seek',
+      value: targetSeconds,
+      timestamp: Date.now(),
+    });
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'play',
+      timestamp: Date.now(),
+    });
+  };
+
   // Listen for BroadcastChannel commands from Remote Controller
   useEffect(() => {
     const unsubscribe = syncManager.subscribe((msg: SyncMessage) => {
@@ -596,6 +626,8 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
           handlePrevEpisode();
         } else if (command === 'next_ep') {
           handleNextEpisode();
+        } else if (command === 'back' || command === 'close_tab' || command === 'close_popups') {
+          popupManager.closeAllOpenedTabs();
         }
       }
     });
@@ -692,13 +724,6 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       sendEmbedMasterCommand('play');
       setIsPlaying(true);
     }
-  };
-
-  // Scrubber change
-  const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const target = Number(e.target.value);
-    setCurrentTime(target);
-    sendEmbedMasterCommand('seek', target);
   };
 
   // Volume & Mute
@@ -1194,31 +1219,20 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               : 'aspect-video rounded-2xl sm:rounded-3xl'
           }`}
         >
-          {/* Loading spinner while iframe connects */}
-          {isIframeLoading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-zinc-950/95 backdrop-blur-sm pointer-events-none">
-              <div className="relative">
-                <div className="w-14 h-14 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" />
-                <Play className="w-6 h-6 text-amber-400 absolute inset-0 m-auto" />
-              </div>
-              <span className="text-xs font-mono text-zinc-400">
-                Loading {item.title} on {currentServer.name}...
-              </span>
-            </div>
-          )}
-
-          {/* The EmbedMaster iframe: 100% width, 100% height, full screen player */}
+          {/* The EmbedMaster iframe: 100% width, 100% height, direct touch & click enabled with ZERO shield */}
           <iframe
             id="embedmaster_iframe"
             ref={iframeRef}
             key={`${playerUrl}-${activeSeason}-${activeEpisode}`}
             src={playerUrl}
             title={`${item.title} EmbedMaster Player`}
-            className="w-full h-full border-0 absolute inset-0 block"
-            allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *"
+            className="w-full h-full border-0 absolute inset-0 block pointer-events-auto"
+            style={{
+              pointerEvents: 'auto',
+            }}
+            allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *; accelerometer *; gyroscope *"
             allowFullScreen
             referrerPolicy="origin"
-            onLoad={() => setIsIframeLoading(false)}
           />
         </div>
       )}
@@ -1230,32 +1244,6 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
           isLocked ? 'opacity-30 pointer-events-none' : ''
         }`}
       >
-        {/* TIMELINE PROGRESS SCRUBBER ROW */}
-        <div className="w-full flex items-center gap-2.5 sm:gap-4">
-          <span className="text-[11px] sm:text-xs font-mono font-bold text-amber-400 shrink-0 min-w-[42px]">
-            {formatTime(currentTime)}
-          </span>
-
-          {/* Interactive Scrub Bar */}
-          <div className="relative flex-1 flex items-center group py-1">
-            <input
-              id="embedmaster-scrub-slider"
-              type="range"
-              min={0}
-              max={duration > 0 ? duration : 100}
-              step={1}
-              value={currentTime}
-              onChange={handleScrubberChange}
-              className="w-full h-2 rounded-lg bg-zinc-800 accent-amber-400 hover:accent-amber-300 cursor-pointer appearance-none focus:outline-none transition-all"
-              title="Click or drag to seek"
-            />
-          </div>
-
-          <span className="text-[11px] sm:text-xs font-mono text-zinc-400 shrink-0 min-w-[42px] text-right">
-            {formatTime(duration)}
-          </span>
-        </div>
-
         {/* MAIN CONTROLS ROW */}
         <div className="w-full flex flex-wrap items-center justify-between gap-2.5">
           {/* Left: Playback Controls (Play/Pause, Rewind, Fast Forward) */}
@@ -1307,6 +1295,45 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
             >
               <span className="hidden sm:inline">+10s</span>
               <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+            </button>
+          </div>
+
+          {/* Custom Minute Input Box with Play Icon (Before Volume Bar) */}
+          <div 
+            id="player-control-custom-minute-box"
+            className="flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-2xl px-2 sm:px-2.5 py-1.5 gap-1 sm:gap-1.5 focus-within:border-amber-500/60 shadow-sm transition-all"
+            title="Enter minutes to jump directly and play"
+          >
+            <span className="text-[10px] sm:text-xs font-mono font-bold text-zinc-400 uppercase tracking-tight pl-0.5 select-none">
+              Min:
+            </span>
+            <input
+              id="input-custom-minute-seek"
+              type="number"
+              min={0}
+              step="any"
+              placeholder="0"
+              value={customMinutes}
+              onChange={(e) => setCustomMinutes(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleCustomMinutePlay();
+                }
+              }}
+              className="w-10 sm:w-12 text-center bg-transparent text-amber-400 text-xs sm:text-sm font-mono font-bold outline-none placeholder:text-zinc-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              title="Enter minute (e.g. 5, 12, 45) and click play"
+            />
+            <button
+              id="btn-custom-minute-play"
+              type="button"
+              onClick={handleCustomMinutePlay}
+              disabled={!customMinutes.trim()}
+              className="p-1 sm:p-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed shadow-sm shrink-0"
+              title="Play from this minute"
+              aria-label="Play from entered minute"
+            >
+              <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-black stroke-black translate-x-0.5" />
             </button>
           </div>
 
@@ -1449,6 +1476,21 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               </div>
             )}
 
+            {/* Back / Close Opened Tab Button */}
+            <button
+              id="player-control-back-tab-btn"
+              type="button"
+              onClick={() => {
+                soundFx.playClick('switch');
+                popupManager.closeAllOpenedTabs();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-amber-400 border border-zinc-700 text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-sm"
+              title="Back / Close Ad Tab without reloading player"
+            >
+              <ArrowLeft className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+
             {/* Fullscreen Button */}
             <button
               id="player-control-fullscreen-btn"
@@ -1460,29 +1502,6 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               <Maximize2 className="w-4 h-4 text-amber-400" />
               <span className="hidden sm:inline">Fullscreen</span>
             </button>
-          </div>
-        </div>
-
-        {/* BOTTOM HUD STATUS BAR (EmbedMaster Connection Indicator) */}
-        <div className="flex items-center justify-between pt-2 border-t border-zinc-900 text-xs text-zinc-500 font-mono">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-zinc-300 font-sans font-semibold">
-              EmbedMaster Player Active
-            </span>
-            <span className="text-zinc-600">|</span>
-            <span className="text-zinc-400 hidden sm:inline">
-              Event: <strong className="text-amber-400">{lastEvent}</strong>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-500 text-[11px] hidden sm:inline">
-              External Controls via Remote & Deck
-            </span>
-            <span className="text-amber-500/80 bg-amber-500/10 px-2 py-0.5 rounded text-[10px]">
-              PostMessage Connected
-            </span>
           </div>
         </div>
       </div>

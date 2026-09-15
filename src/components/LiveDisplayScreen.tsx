@@ -45,6 +45,7 @@ import {
   isFullscreenActive, 
   registerTvDpadNavigation 
 } from '../utils/tvNavigation';
+import { popupManager } from '../utils/popupManager';
 
 export const LiveDisplayScreen: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -268,13 +269,10 @@ export const LiveDisplayScreen: React.FC = () => {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     window.addEventListener('unload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('unload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
-      closeRoom(roomCode);
     };
   }, [roomCode]);
 
@@ -367,6 +365,8 @@ export const LiveDisplayScreen: React.FC = () => {
           } else if (data.action === 'seek') {
             const seekVal = typeof data.currentTime === 'number' ? data.currentTime : 0;
             setLatestCommand({ command: 'seek', value: seekVal, timestamp: ts });
+          } else if (data.action === 'back' || data.action === 'close_tab' || data.action === 'close_popups') {
+            popupManager.closeAllOpenedTabs();
           }
         }
       }
@@ -434,6 +434,8 @@ export const LiveDisplayScreen: React.FC = () => {
       } else if (msg.type === 'PLAYER_COMMAND') {
         if (msg.command === 'stop') {
           setPlayingItem(null);
+        } else if (msg.command === 'back' || msg.command === 'close_tab' || msg.command === 'close_popups') {
+          popupManager.closeAllOpenedTabs();
         } else {
           setLatestCommand({ command: msg.command, value: msg.value, extra: msg.extra, timestamp: msg.timestamp });
         }
@@ -477,21 +479,21 @@ export const LiveDisplayScreen: React.FC = () => {
     };
   }, [playingItem]);
 
-  // Prevent browser back button or back navigation from returning to main page
+  // Prevent browser back button or back navigation from closing TV screen
   useEffect(() => {
-    // Trap browser history so back button cannot navigate to main page
-    window.history.pushState({ tvScreen: true }, '', window.location.href);
+    // Trap browser history so back button cannot navigate away
+    try {
+      window.history.pushState({ tvScreen: true }, '', window.location.href);
+    } catch (_) {}
 
     const handlePopState = (e: PopStateEvent) => {
       e.preventDefault();
-      closeRoom(roomCode);
-      setRoomStatus('closed');
-      setIsTvClosed(true);
+      // Only close opened ad popups/tabs if any, NEVER close the TV Screen itself!
+      popupManager.closeAllOpenedTabs();
+      // Keep state so TV Screen stays open
       try {
-        window.close();
+        window.history.pushState({ tvScreen: true }, '', window.location.href);
       } catch (_) {}
-      // Keep pushing state so browser never navigates back to main page
-      window.history.pushState({ tvScreen: true }, '', window.location.href);
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -504,7 +506,9 @@ export const LiveDisplayScreen: React.FC = () => {
   useEffect(() => {
     const unregister = registerTvDpadNavigation({
       onBack: () => {
-        handleCloseTV();
+        // If any popup or new tab was opened, close it immediately and keep player undisturbed!
+        popupManager.closeAllOpenedTabs();
+        // TV Screen must NOT close on back key unless user explicitly clicks Close/Power button!
       },
       onPlayPauseToggle: () => {
         setLatestCommand((prev) => ({
@@ -922,41 +926,6 @@ export const LiveDisplayScreen: React.FC = () => {
           }}
         />
       )}
-
-      {/* 6.5 Full-Screen Transparent Click Lock Shield */}
-      {/* Intercepts and locks out all clicks/touches anywhere on TV screen so that ONLY the player control dock works */}
-      <div
-        id="tv-screen-click-lock-shield"
-        className="fixed inset-0 w-screen h-screen z-[10001] bg-transparent pointer-events-auto select-none cursor-default"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onDoubleClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onMouseUp={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onTouchStart={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onTouchEnd={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-      />
 
       {/* 7. Direct Touch & Mouse Quick Floating On-Screen Controls */}
       <div 

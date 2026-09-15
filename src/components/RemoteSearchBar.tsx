@@ -232,15 +232,15 @@ export const RemoteSearchBar: React.FC<RemoteSearchBarProps> = ({
 
   const getPlaceholderText = () => {
     if (activeCategory === 'movies') {
-      return 'Search movies by title, actor, director or keyword...';
+      return 'Search movies, actors, actresses, directors, producers...';
     }
     if (activeCategory === 'tv') {
-      return 'Search TV shows by series title, network or creator...';
+      return 'Search TV shows, actors, creators, producers, directors...';
     }
     if (activeCategory === 'anime') {
-      return 'Search anime by title, studio, Japanese name or era...';
+      return 'Search anime, voice actors, creators, directors, studios...';
     }
-    return 'Search movies, TV shows, and anime...';
+    return 'Search movies, TV shows, anime, actors, directors...';
   };
 
   // Helper for human-readable labels

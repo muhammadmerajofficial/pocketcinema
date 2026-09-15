@@ -1,4 +1,4 @@
-import { CategoryType, MediaItem, AdvancedSearchFilters } from '../types';
+import { CategoryType, MediaItem, AdvancedSearchFilters, PersonItem } from '../types';
 import { MEDIA_COLLECTION } from '../data/mediaData';
 
 // Get API config from index.html window.CINEMATIC_CONFIG with direct fallbacks
@@ -647,3 +647,162 @@ export async function loadCategoryMedia(
     items: result.items.filter((item) => item.category === targetCategory),
   };
 }
+
+// --- Search Actors, Actresses, Directors, Producers & Creators ---
+export async function searchPersons(searchQuery: string): Promise<PersonItem[]> {
+  if (!searchQuery.trim()) return [];
+  try {
+    const key = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_API_KEY) || TMDB_API_KEY;
+    const baseUrl = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_BASE_URL) || TMDB_BASE_URL;
+
+    const url = `${baseUrl}/search/person?api_key=${key}&query=${encodeURIComponent(searchQuery.trim())}&include_adult=false&page=1`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+
+    if (!Array.isArray(data.results)) return [];
+
+    return data.results.slice(0, 8).map((p: any) => {
+      const knownForTitles = (p.known_for || [])
+        .map((k: any) => k.title || k.name)
+        .filter(Boolean);
+
+      const dept = p.known_for_department || 'Acting';
+      let roleTitle = dept;
+      if (dept === 'Acting') {
+        roleTitle = p.gender === 1 ? 'Actress' : 'Actor';
+      } else if (dept === 'Directing') {
+        roleTitle = 'Director';
+      } else if (dept === 'Production') {
+        roleTitle = 'Producer';
+      } else if (dept === 'Writing') {
+        roleTitle = 'Writer';
+      } else if (dept === 'Creator') {
+        roleTitle = 'Creator';
+      }
+
+      const profilePath = p.profile_path
+        ? `${TMDB_IMAGE_BASE}/w500${p.profile_path}`
+        : '';
+
+      return {
+        id: p.id,
+        name: p.name || p.original_name || 'Artist',
+        knownForDepartment: dept,
+        roleTitle,
+        profilePath,
+        popularity: p.popularity || 0,
+        knownForTitles,
+        gender: p.gender,
+      };
+    });
+  } catch (err) {
+    console.warn('[TMDB] searchPersons error:', err);
+    return [];
+  }
+}
+
+// --- Fetch all Movies, TV Shows, and Anime for a Person (Filmography & Works) ---
+export async function fetchPersonCombinedCredits(personId: number): Promise<MediaItem[]> {
+  try {
+    const key = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_API_KEY) || TMDB_API_KEY;
+    const baseUrl = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_BASE_URL) || TMDB_BASE_URL;
+
+    const url = `${baseUrl}/person/${personId}/combined_credits?api_key=${key}&language=en-US`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+
+    const rawList: any[] = [
+      ...(Array.isArray(data.cast) ? data.cast : []),
+      ...(Array.isArray(data.crew) ? data.crew : []),
+    ];
+
+    const seenIds = new Set<string>();
+    const items: MediaItem[] = [];
+
+    // Sort by popularity and vote count so prominent titles come first
+    rawList.sort((a, b) => ((b.vote_count || 0) * 0.5 + (b.popularity || 0)) - ((a.vote_count || 0) * 0.5 + (a.popularity || 0)));
+
+    for (const raw of rawList) {
+      if (!raw || !raw.id) continue;
+      const mediaType = raw.media_type || (raw.title ? 'movie' : 'tv');
+      const uniqueKey = `${mediaType}-${raw.id}`;
+      if (seenIds.has(uniqueKey)) continue;
+      seenIds.add(uniqueKey);
+
+      // Determine category (movies, tv, or anime)
+      const rawGenres = (raw.genre_ids || [])
+        .map((gid: number) => (mediaType === 'movie' ? MOVIE_GENRES[gid] : TV_GENRES[gid]))
+        .filter(Boolean);
+
+      const isAnime = 
+        (raw.original_language === 'ja' && (rawGenres.includes('Animation') || rawGenres.includes('Anime'))) ||
+        (rawGenres.includes('Animation') && (raw.origin_country || []).includes('JP'));
+
+      const category: CategoryType = isAnime 
+        ? 'anime' 
+        : mediaType === 'movie' 
+        ? 'movies' 
+        : 'tv';
+
+      const title = raw.title || raw.name || raw.original_title || raw.original_name || 'Untitled';
+      const releaseDate = raw.release_date || raw.first_air_date || '';
+      const year = releaseDate ? parseInt(releaseDate.slice(0, 4), 10) || 2024 : 2024;
+
+      const poster = raw.poster_path
+        ? `${TMDB_IMAGE_BASE}/w500${raw.poster_path}`
+        : 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=800&auto=format&fit=crop';
+
+      const backdrop = raw.backdrop_path
+        ? `${TMDB_IMAGE_BASE}/w1280${raw.backdrop_path}`
+        : poster;
+
+      const rating = raw.vote_average ? Math.round(raw.vote_average * 10) / 10 : 7.5;
+      const roleDescription = raw.character ? `As ${raw.character}` : raw.job ? raw.job : raw.department || 'Production';
+
+      items.push({
+        id: mediaType === 'movie' ? `tmdb-m-${raw.id}` : `tmdb-tv-${raw.id}`,
+        title,
+        category,
+        year,
+        releaseDate: releaseDate || `${year}`,
+        poster,
+        backdrop,
+        rating,
+        genres: rawGenres.length > 0 ? rawGenres.slice(0, 3) : [category === 'movies' ? 'Movie' : category === 'tv' ? 'TV Series' : 'Anime'],
+        durationOrEpisodes: category === 'movies' ? 'Feature Film' : 'Series',
+        directorOrStudio: roleDescription,
+        synopsis: raw.overview || 'No synopsis provided.',
+        ageRating: 'PG-13',
+        timelineEra: getTimelineEra(year),
+        originalLanguage: raw.original_language || 'en',
+        originCountry: raw.origin_country || ['US'],
+      });
+    }
+
+    return items;
+  } catch (err) {
+    console.warn('[TMDB] fetchPersonCombinedCredits error:', err);
+    return [];
+  }
+}
+
+// --- Fetch Biography and Details for a Person ---
+export async function fetchPersonDetails(personId: number): Promise<{ biography?: string } | null> {
+  try {
+    const key = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_API_KEY) || TMDB_API_KEY;
+    const baseUrl = (typeof window !== 'undefined' && window.CINEMATIC_CONFIG?.TMDB_BASE_URL) || TMDB_BASE_URL;
+
+    const url = `${baseUrl}/person/${personId}?api_key=${key}&language=en-US`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      biography: data.biography || '',
+    };
+  } catch (err) {
+    return null;
+  }
+}
+

@@ -29,7 +29,8 @@ export const PosterSelectorDpad: React.FC<PosterSelectorDpadProps> = ({
   category,
   hasBottomBar = false,
 }) => {
-  const [isDpadHidden, setIsDpadHidden] = useState<boolean>(false);
+  // Closed/hidden by default - user opens it when needed
+  const [isDpadHidden, setIsDpadHidden] = useState<boolean>(true);
 
   const getGridCols = () => {
     if (typeof window === 'undefined') return 5;

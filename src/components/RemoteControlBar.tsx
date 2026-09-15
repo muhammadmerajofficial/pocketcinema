@@ -75,6 +75,17 @@ export const RemoteControlBar: React.FC<RemoteControlBarProps> = ({
 
   // Switch between "Player Control Deck" and "Navigation D-Pad"
   const [remoteMode, setRemoteMode] = useState<'player' | 'nav'>('player');
+  const [customMinutes, setCustomMinutes] = useState<string>('');
+
+  const handleCustomMinutePlay = () => {
+    const mins = parseFloat(customMinutes);
+    if (isNaN(mins) || mins < 0) return;
+    soundFx.playClick('ok');
+    const target = mins * 60;
+    setPlayerStatus((prev) => ({ ...prev, currentTime: target, isPlaying: true }));
+    sendPlayerCommand('seek', target);
+    sendPlayerCommand('play');
+  };
 
   useEffect(() => {
     if (isPlaying) {
@@ -300,6 +311,45 @@ export const RemoteControlBar: React.FC<RemoteControlBarProps> = ({
               >
                 <span>+10s</span>
                 <RotateCw className="w-4 h-4 text-amber-400" />
+              </button>
+            </div>
+
+            {/* Custom Minute Input Box with Play Icon (Before Volume Bar) */}
+            <div 
+              id="remote-custom-minute-box"
+              className="flex items-center bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl px-2 py-1.5 gap-1 focus-within:border-amber-500/60 transition-colors shadow-sm"
+              title="Enter minutes to play directly"
+            >
+              <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-tight select-none">
+                Min:
+              </span>
+              <input
+                id="remote-custom-minute-input"
+                type="number"
+                min={0}
+                step="any"
+                placeholder="0"
+                value={customMinutes}
+                onChange={(e) => setCustomMinutes(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleCustomMinutePlay();
+                  }
+                }}
+                className="w-9 sm:w-11 text-center bg-transparent text-amber-400 text-xs font-mono font-bold outline-none placeholder:text-zinc-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                title="Enter minute (e.g. 5, 12, 45) and click play"
+              />
+              <button
+                id="remote-custom-minute-play-btn"
+                type="button"
+                onClick={handleCustomMinutePlay}
+                disabled={!customMinutes.trim()}
+                className="p-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed shadow-sm shrink-0"
+                title="Play from this minute"
+                aria-label="Play from this minute"
+              >
+                <Play className="w-3 h-3 fill-black stroke-black translate-x-0.5" />
               </button>
             </div>
 

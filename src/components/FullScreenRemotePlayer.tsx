@@ -4,6 +4,7 @@ import { ALL_PLAYER_SERVERS, formatEmbedMasterId } from '../utils/servers';
 import { updateRemoteSession, QUICK_CONNECT_CODE } from '../services/remotePairing';
 import { syncManager, SyncMessage } from '../utils/syncChannel';
 import { openFullscreen, registerTvDpadNavigation } from '../utils/tvNavigation';
+import { popupManager } from '../utils/popupManager';
 
 interface FullScreenRemotePlayerProps {
   item: MediaItem;
@@ -276,6 +277,11 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
 
   // Dispatch execution and handle Stop / Exit
   const executePlayerCommand = (command: string, value?: any, extra?: any) => {
+    if (command === 'back' || command === 'close_tab' || command === 'close_popups') {
+      popupManager.closeAllOpenedTabs();
+      return;
+    }
+
     if (command === 'stop') {
       sendCommandToIframe('stop');
       onExit?.();
@@ -624,7 +630,7 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
     >
       {/* 
         EmbedMaster 100% Full-Screen Video Canvas
-        Strictly NO controls, NO overlays, NO buttons on top of player
+        Direct touch & click enabled; popup tabs auto-close on Back button without reload
       */}
       <iframe
         ref={iframeRef}
@@ -632,15 +638,16 @@ export const FullScreenRemotePlayer: React.FC<FullScreenRemotePlayerProps> = ({
         key={`${item.id}-${serverIndex}-${season}-${episode}`}
         src={playerUrl}
         title={item.title}
-        tabIndex={0}
-        className="w-full h-full border-0 bg-black block"
+        tabIndex={-1}
+        className="w-full h-full border-0 bg-black block pointer-events-auto"
         style={{
           width: '100%',
           height: '100%',
           border: 'none',
           outline: 'none',
+          pointerEvents: 'auto',
         }}
-        allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *; accelerometer *; gyroscope *; clipboard-write *"
+        allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *; accelerometer *; gyroscope *"
         allowFullScreen
         onLoad={() => {
           setIsIframeLoaded(true);

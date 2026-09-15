@@ -18,7 +18,7 @@ export type SyncMessage =
   | { type: 'PLAY'; item: MediaItem; serverIndex?: number; season?: number; episode?: number }
   | { type: 'PLAYER_CONFIG'; serverIndex: number; season: number; episode: number }
   | { type: 'PLAYER_ACTION'; action: 'play' | 'preview' | 'next'; timestamp: number }
-  | { type: 'PLAYER_COMMAND'; command: 'play' | 'pause' | 'seek' | 'rewind' | 'forward' | 'mute' | 'unmute' | 'volume' | 'fullscreen' | 'prev_ep' | 'next_ep' | 'stop'; value?: any; extra?: any; timestamp: number }
+  | { type: 'PLAYER_COMMAND'; command: 'play' | 'pause' | 'seek' | 'rewind' | 'forward' | 'mute' | 'unmute' | 'volume' | 'fullscreen' | 'prev_ep' | 'next_ep' | 'stop' | 'back' | 'close_tab' | 'close_popups' | 'tab_opened' | 'tabs_closed'; value?: any; extra?: any; timestamp: number }
   | { type: 'PLAYER_STATUS'; isPlaying: boolean; currentTime: number; duration: number; volume: number; isMuted: boolean; activeSeason?: number; activeEpisode?: number; timestamp: number }
   | { type: 'CLOSE_PLAYER' }
   | { type: 'DISCONNECT'; roomCode?: string; timestamp?: number }

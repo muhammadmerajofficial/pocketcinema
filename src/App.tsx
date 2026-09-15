@@ -23,9 +23,9 @@ import {
   Lock,
   Power
 } from 'lucide-react';
-import { CategoryType, MediaItem, AdvancedSearchFilters } from './types';
+import { CategoryType, MediaItem, AdvancedSearchFilters, PersonItem } from './types';
 import { MEDIA_COLLECTION } from './data/mediaData';
-import { loadCategoryMedia } from './services/api';
+import { loadCategoryMedia, searchPersons, fetchPersonCombinedCredits } from './services/api';
 import { RemoteTopNav } from './components/RemoteTopNav';
 import { RemoteSearchBar } from './components/RemoteSearchBar';
 import { RemoteControlBar } from './components/RemoteControlBar';
@@ -129,6 +129,11 @@ export default function App() {
   advancedFiltersRef.current = advancedFilters;
 
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [matchingPersons, setMatchingPersons] = useState<PersonItem[]>([]);
+  const [activePersonFilter, setActivePersonFilter] = useState<PersonItem | null>(null);
+  const [personCredits, setPersonCredits] = useState<MediaItem[]>([]);
+  const [isPersonCreditsLoading, setIsPersonCreditsLoading] = useState(false);
+  const [personCreditsCategory, setPersonCreditsCategory] = useState<'all' | CategoryType>('all');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
@@ -648,6 +653,25 @@ export default function App() {
     }
   };
 
+  const handleVolumeChange = (vol: number) => {
+    const clamped = Math.max(0, Math.min(100, vol));
+    setRemoteVolume(clamped);
+    const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
+    const ts = Date.now();
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'volume',
+      value: clamped,
+      timestamp: ts,
+    });
+    if (code) {
+      updateRoom(code, {
+        volume: clamped,
+        lastCommandTimestamp: ts,
+      });
+    }
+  };
+
   const handlePlaySeasonEpisode = (seasonNum: number, episodeNum: number) => {
     const targetItem = playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null);
     if (targetItem) {
@@ -669,7 +693,12 @@ export default function App() {
         playingItem: null,
         lastCommandTimestamp: Date.now(),
       });
+      closeRoom(code);
     }
+    setPairingCode('');
+    try {
+      localStorage.removeItem('cinematic_remote_room_code');
+    } catch (_) {}
   };
 
   const handleDisconnectRemote = () => {
@@ -722,8 +751,17 @@ export default function App() {
     isFetchingRef.current = true;
     try {
       const activeFilters = filters || advancedFiltersRef.current;
-      const result = await loadCategoryMedia(cat, query, 1, activeFilters);
+      
+      // Parallel fetch: Media items & Person search (actors, actresses, directors, producers)
+      const fetchMediaPromise = loadCategoryMedia(cat, query, 1, activeFilters);
+      const searchPersonsPromise = query.trim() ? searchPersons(query.trim()) : Promise.resolve([]);
+
+      const [result, persons] = await Promise.all([fetchMediaPromise, searchPersonsPromise]);
       setMediaItems(result.items);
+      setMatchingPersons(persons);
+      setActivePersonFilter(null);
+      setPersonCredits([]);
+      setPersonCreditsCategory('all');
       setHasMore(result.hasMore);
       setSelectedIndex(0);
 
@@ -753,6 +791,30 @@ export default function App() {
       setIsLoading(false);
       isFetchingRef.current = false;
     }
+  }, []);
+
+  // Handle selecting a person (Actor, Director, Producer) to view their filmography & works
+  const handleSelectPerson = useCallback(async (person: PersonItem) => {
+    setActivePersonFilter(person);
+    setIsPersonCreditsLoading(true);
+    setPersonCreditsCategory('all');
+    try {
+      const credits = await fetchPersonCombinedCredits(person.id);
+      setPersonCredits(credits);
+      setSelectedIndex(0);
+    } catch (err) {
+      console.error('[TMDB Person Credits Error]:', err);
+    } finally {
+      setIsPersonCreditsLoading(false);
+    }
+  }, []);
+
+  // Handle clearing person filter to return back to unified search view
+  const handleClearPersonFilter = useCallback(() => {
+    setActivePersonFilter(null);
+    setPersonCredits([]);
+    setPersonCreditsCategory('all');
+    setSelectedIndex(0);
   }, []);
 
   // Fetch more media (Infinite Scrolling)
@@ -817,6 +879,11 @@ export default function App() {
     [isLoading, isLoadingMore, hasMore, fetchMoreMedia]
   );
 
+  // Active navigable list (either filtered person works or general media catalog)
+  const currentNavItems = activePersonFilter
+    ? (personCreditsCategory === 'all' ? personCredits : personCredits.filter(i => i.category === personCreditsCategory))
+    : mediaItems;
+
   // Keyboard navigation for TV remote feel (D-Pad & Shortcuts)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -826,52 +893,54 @@ export default function App() {
 
       if (e.key === 'ArrowRight') {
         e.preventDefault();
-        const next = Math.min(selectedIndex + 1, mediaItems.length - 1);
+        const next = Math.min(selectedIndex + 1, currentNavItems.length - 1);
         setSelectedIndex(next);
         soundFx.playClick('switch');
-        if (mediaItems[next]) {
-          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        if (currentNavItems[next]) {
+          handlePlayMediaRef.current(currentNavItems[next], 1, 1);
         }
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         const next = Math.max(selectedIndex - 1, 0);
         setSelectedIndex(next);
         soundFx.playClick('switch');
-        if (mediaItems[next]) {
-          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        if (currentNavItems[next]) {
+          handlePlayMediaRef.current(currentNavItems[next], 1, 1);
         }
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        const next = Math.min(selectedIndex + 4, mediaItems.length - 1);
+        const next = Math.min(selectedIndex + 4, currentNavItems.length - 1);
         setSelectedIndex(next);
         soundFx.playClick('switch');
-        if (mediaItems[next]) {
-          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        if (currentNavItems[next]) {
+          handlePlayMediaRef.current(currentNavItems[next], 1, 1);
         }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const next = Math.max(selectedIndex - 4, 0);
         setSelectedIndex(next);
         soundFx.playClick('switch');
-        if (mediaItems[next]) {
-          handlePlayMediaRef.current(mediaItems[next], 1, 1);
+        if (currentNavItems[next]) {
+          handlePlayMediaRef.current(currentNavItems[next], 1, 1);
         }
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        if (mediaItems[selectedIndex]) {
+        if (currentNavItems[selectedIndex]) {
           soundFx.playClick('ok');
-          handlePlayMediaRef.current(mediaItems[selectedIndex], 1, 1);
+          handlePlayMediaRef.current(currentNavItems[selectedIndex], 1, 1);
         }
       } else if (e.key === 'Escape') {
         if (activeModalItem) {
           setActiveModalItem(null);
+        } else if (activePersonFilter) {
+          handleClearPersonFilter();
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [mediaItems, selectedIndex, activeModalItem, isScreenLocked]);
+  }, [currentNavItems, selectedIndex, activeModalItem, isScreenLocked, activePersonFilter, handleClearPersonFilter]);
 
   // Scroll listener for back to top button
   useEffect(() => {
@@ -1050,7 +1119,7 @@ export default function App() {
 
       {/* 3. MAIN CONTENT CONTAINER */}
       <div className={`max-w-7xl mx-auto w-full px-4 sm:px-6 py-4 flex-1 flex flex-col gap-4 transition-all ${
-        pairingCode || (playingMedia && !isPlayerDismissed) ? 'pb-16 sm:pb-20' : 'pb-12'
+        pairingCode ? 'pb-20 sm:pb-24' : 'pb-12'
       }`}>
         {/* If TV Screen is Connected: Lock Main Page Player ("tv connect korle tkhon main page a player lock thakbe mane open kora jabe na") */}
         {pairingCode ? (
@@ -1153,8 +1222,7 @@ export default function App() {
                     <Tv2 className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col">
-                    <span className="font-bold text-white">Cinema Player is docked</span>
-                    <span className="text-zinc-500 text-[11px]">Click to open or select any title from the list below</span>
+                    <span className="font-bold text-white">Cinema Player</span>
                   </div>
                 </div>
                 <button
@@ -1182,6 +1250,9 @@ export default function App() {
             if (isScreenLocked) return;
             soundFx.playClick('switch');
             autoPlayCategoryChangeRef.current = true;
+            setActivePersonFilter(null);
+            setMatchingPersons([]);
+            setPersonCredits([]);
             if (cat === activeCategory) {
               fetchInitialMedia(cat, searchQuery, true, advancedFilters);
             } else {
@@ -1196,10 +1267,14 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchChange={(query) => {
             if (isScreenLocked) return;
+            setActivePersonFilter(null);
             setSearchQuery(query);
           }}
           onClearSearch={() => {
             if (isScreenLocked) return;
+            setActivePersonFilter(null);
+            setMatchingPersons([]);
+            setPersonCredits([]);
             setSearchQuery('');
           }}
           activeCategory={activeCategory}
@@ -1218,11 +1293,11 @@ export default function App() {
         <main className="flex-1">
           <TimelineView
             category={activeCategory}
-            items={mediaItems}
+            items={activePersonFilter ? personCredits : mediaItems}
             selectedIndex={selectedIndex}
-            isLoading={isLoading}
-            isLoadingMore={isLoadingMore}
-            hasMore={hasMore}
+            isLoading={activePersonFilter ? isPersonCreditsLoading : isLoading}
+            isLoadingMore={activePersonFilter ? false : isLoadingMore}
+            hasMore={activePersonFilter ? false : hasMore}
             disabled={isScreenLocked}
             onSelectItem={(idx) => {
               if (isScreenLocked) return;
@@ -1237,16 +1312,23 @@ export default function App() {
               handlePlayMedia(item, 1, 1);
             }}
             loadMoreRef={loadMoreAnchorRef}
+            persons={matchingPersons}
+            onSelectPerson={handleSelectPerson}
+            activePerson={activePersonFilter}
+            onClearPerson={handleClearPersonFilter}
+            personCategoryFilter={personCreditsCategory}
+            onPersonCategoryFilterChange={setPersonCreditsCategory}
+            isPersonLoading={isPersonCreditsLoading}
           />
         </main>
       </div>
 
       {/* 4. POSTER SELECTOR D-PAD CONTROLLER */}
       <PosterSelectorDpad
-        items={mediaItems}
+        items={currentNavItems}
         selectedIndex={selectedIndex}
         category={activeCategory}
-        hasBottomBar={Boolean(pairingCode || playingMedia)}
+        hasBottomBar={Boolean(pairingCode)}
         disabled={isScreenLocked}
         onSelectItem={(idx) => {
           if (isScreenLocked) return;
@@ -1258,14 +1340,16 @@ export default function App() {
         }}
       />
 
-      {/* 5. SLEEK BOTTOM PLAYER CONTROL BAR (Thin, simple, 1 line on bottom) */}
-      {(pairingCode || playingMedia) && (
+      {/* 5. SLEEK BOTTOM PLAYER CONTROL BAR: ONLY displays when TV Screen is active/connected */}
+      {Boolean(pairingCode) && (
         <ConnectedRemotePanel
           isPlaying={isRemotePlaying}
-          item={playingMedia || mediaItems[selectedIndex]}
+          item={playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0]}
           season={playerSeason}
           episode={playerEpisode}
           category={activeCategory}
+          volume={remoteVolume}
+          onVolumeChange={handleVolumeChange}
           onTogglePlayPause={handleTogglePlayPause}
           onRewind10={handleRewind10}
           onForward10={handleForward10}
@@ -1308,7 +1392,7 @@ export default function App() {
           type="button"
           onClick={handleScrollToTop}
           className={`fixed right-5 z-30 p-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black shadow-xl shadow-amber-500/20 active:scale-95 transition-all cursor-pointer ${
-            pairingCode || playingMedia ? 'bottom-22 sm:bottom-24' : 'bottom-6'
+            pairingCode ? 'bottom-22 sm:bottom-24' : 'bottom-6'
           }`}
           title="Scroll to Top"
         >

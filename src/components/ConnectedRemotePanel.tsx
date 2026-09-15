@@ -6,10 +6,18 @@ import {
   RotateCw, 
   X,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Volume2,
+  VolumeX,
+  Volume1,
+  ArrowLeft
 } from 'lucide-react';
 import { MediaItem } from '../types';
 import { fetchTvShowMetadata, TvShowMetadata } from '../services/tvShowData';
+import { popupManager } from '../utils/popupManager';
+import { syncManager } from '../utils/syncChannel';
+import { soundFx } from '../utils/sound';
+import { updateRoom } from '../services/remotePairing';
 
 interface ConnectedRemotePanelProps {
   isPlaying: boolean;
@@ -17,6 +25,8 @@ interface ConnectedRemotePanelProps {
   season?: number;
   episode?: number;
   category?: string;
+  volume?: number;
+  onVolumeChange?: (vol: number) => void;
   onTogglePlayPause: () => void;
   onRewind10: () => void;
   onForward10: () => void;
@@ -31,6 +41,8 @@ export const ConnectedRemotePanel: React.FC<ConnectedRemotePanelProps> = ({
   season = 1,
   episode = 1,
   category,
+  volume = 100,
+  onVolumeChange,
   onTogglePlayPause,
   onRewind10,
   onForward10,
@@ -100,6 +112,9 @@ export const ConnectedRemotePanel: React.FC<ConnectedRemotePanelProps> = ({
     const mins = parseFloat(customMinutes);
     if (!isNaN(mins) && mins >= 0) {
       onSeekTime(mins * 60);
+      if (!isPlaying) {
+        onTogglePlayPause();
+      }
       setCustomMinutes('');
     }
   };
@@ -259,14 +274,21 @@ export const ConnectedRemotePanel: React.FC<ConnectedRemotePanelProps> = ({
             <RotateCw className="w-4 h-4 text-amber-400" />
           </button>
 
-          {/* Custom Time Jump Box + Play Icon */}
-          <div className="flex items-center bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl px-1.5 sm:px-2 py-1 gap-1 focus-within:border-amber-500/60 transition-colors">
+          {/* Custom Time Jump Box + Play Icon (Before Volume Bar) */}
+          <div 
+            id="ctrl-custom-minute-box"
+            className="flex items-center bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl px-1.5 sm:px-2 py-1 gap-1 focus-within:border-amber-500/60 transition-colors shadow-sm"
+            title="Enter minutes to play directly"
+          >
+            <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-tight select-none">
+              Min:
+            </span>
             <input
               id="ctrl-input-jump-time"
               type="number"
               min={0}
               step="any"
-              placeholder="Min"
+              placeholder="0"
               value={customMinutes}
               onChange={(e) => setCustomMinutes(e.target.value)}
               onKeyDown={(e) => {
@@ -276,20 +298,84 @@ export const ConnectedRemotePanel: React.FC<ConnectedRemotePanelProps> = ({
                 }
               }}
               className="w-9 sm:w-11 text-center bg-transparent text-amber-400 text-xs font-mono font-bold outline-none placeholder:text-zinc-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              title="Enter minutes (e.g. 10 or 20) and click play"
+              title="Enter minute (e.g. 5, 12, 45) and click play"
             />
-            <span className="text-[10px] text-zinc-500 font-mono select-none">m</span>
             <button
               id="ctrl-btn-jump-time-play"
               type="button"
               onClick={handleJumpToTime}
               disabled={!customMinutes.trim()}
-              className="p-1 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-400 hover:text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed"
-              title="Jump to time and play"
+              className="p-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed shadow-sm shrink-0"
+              title="Play from this minute"
+              aria-label="Play from this minute"
             >
-              <Play className="w-3 h-3 fill-current stroke-current" />
+              <Play className="w-3 h-3 fill-black stroke-black translate-x-0.5" />
             </button>
           </div>
+
+          {/* Volume Control Bar */}
+          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => {
+                if (onVolumeChange) {
+                  onVolumeChange(volume === 0 ? 100 : 0);
+                }
+              }}
+              className="text-zinc-400 hover:text-amber-400 transition-colors p-0.5 cursor-pointer"
+              title={volume === 0 ? "Unmute" : "Mute"}
+            >
+              {volume === 0 ? (
+                <VolumeX className="w-3.5 h-3.5 text-red-400" />
+              ) : volume < 50 ? (
+                <Volume1 className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+              )}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={volume}
+              onChange={(e) => onVolumeChange?.(Number(e.target.value))}
+              className="w-12 sm:w-16 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              title={`Volume: ${volume}%`}
+            />
+            <span className="text-[10px] font-mono text-zinc-400 w-6 text-right font-semibold hidden sm:inline">
+              {volume}%
+            </span>
+          </div>
+
+          {/* Back / Close Opened Tab Button (Remote Back) */}
+          <button
+            id="ctrl-btn-back-tab"
+            type="button"
+            onClick={() => {
+              soundFx.playClick('switch');
+              popupManager.closeAllOpenedTabs();
+              syncManager.broadcast({
+                type: 'PLAYER_COMMAND',
+                command: 'back',
+                timestamp: Date.now(),
+              });
+              try {
+                const pairedCode = localStorage.getItem('cinematic_paired_code');
+                if (pairedCode) {
+                  updateRoom(pairedCode, {
+                    action: 'back',
+                    lastCommandTimestamp: Date.now(),
+                  } as any);
+                }
+              } catch (_) {}
+            }}
+            className="p-2 sm:p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-zinc-300 hover:text-amber-400 flex items-center justify-center active:scale-95 transition-all cursor-pointer shrink-0"
+            title="Back / Close Ad Tab (Remote Back)"
+            aria-label="Back / Close Tab"
+          >
+            <ArrowLeft className="w-4 h-4 stroke-[2.5]" />
+          </button>
 
           {/* Close Button - ONLY Close Icon (no text) */}
           <button

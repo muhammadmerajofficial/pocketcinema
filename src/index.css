@@ -28,6 +28,14 @@ video, img.poster, iframe {
   object-fit: contain;
 }
 
+/* Ensure player iframe is strictly unclickable to touches and clicks */
+iframe#embedmaster_iframe {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  touch-action: none !important;
+}
+
 /* Smart TV Remote Focus & D-pad Navigation Highlight */
 button:focus, 
 a:focus, 

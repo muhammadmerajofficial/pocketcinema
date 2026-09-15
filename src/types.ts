@@ -35,3 +35,15 @@ export interface RemoteFeedback {
   action: string;
   timestamp: number;
 }
+
+export interface PersonItem {
+  id: number;
+  name: string;
+  knownForDepartment: string;
+  roleTitle: string;
+  profilePath: string;
+  popularity: number;
+  knownForTitles: string[];
+  gender?: number;
+  biography?: string;
+}
