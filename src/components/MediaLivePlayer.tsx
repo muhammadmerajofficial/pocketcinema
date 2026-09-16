@@ -919,11 +919,11 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       className={`w-full flex flex-col items-center select-none font-sans ${
         isFullScreenMode 
           ? 'fixed inset-0 z-50 w-screen h-screen bg-black justify-between' 
-          : 'max-w-[1100px] mx-auto gap-3'
+          : 'w-full mx-0 gap-0'
       }`}
     >
       {/* 1. TOP TITLE & SERVER BAR (Discreet & Sleek) */}
-      <header className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-zinc-950/90 rounded-2xl border border-zinc-800/80 shadow-md">
+      <header className="w-full flex items-center justify-between gap-2 px-3 sm:px-5 py-2 bg-zinc-950/95 border-b border-zinc-800/80 shadow-md">
         <div className="flex items-center gap-2 overflow-hidden">
           <div className="p-1.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
             {item.category === 'movies' ? <Film className="w-4 h-4" /> : <Tv className="w-4 h-4" />}
@@ -1213,10 +1213,10 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       ) : (
         <div 
           id="embedmaster-player-stage"
-          className={`w-full relative bg-black overflow-hidden shadow-2xl border-2 border-zinc-800/90 ${
+          className={`w-full relative bg-black overflow-hidden shadow-2xl ${
             isFullScreenMode 
               ? 'flex-1 rounded-none border-none' 
-              : 'aspect-video rounded-2xl sm:rounded-3xl'
+              : 'w-full aspect-video rounded-none border-0'
           }`}
         >
           {/* The EmbedMaster iframe: 100% width, 100% height, direct touch & click enabled with ZERO shield */}
@@ -1240,20 +1240,20 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       {/* 3. DEDICATED SEPARATE BOTTOM CONTROL BAR ("player control bar alada thakbe niche") */}
       <div 
         id="embedmaster-bottom-control-bar"
-        className={`w-full bg-gradient-to-b from-zinc-950 via-zinc-950 to-black border border-zinc-800 rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex flex-col gap-2.5 sm:gap-3 transition-opacity ${
+        className={`w-full bg-gradient-to-b from-zinc-950 via-zinc-950 to-black border-t border-zinc-800/80 rounded-none p-2.5 sm:px-4 sm:py-3 shadow-2xl flex flex-col gap-2 transition-opacity ${
           isLocked ? 'opacity-30 pointer-events-none' : ''
         }`}
       >
-        {/* ROW 1: Playback Controls (Rewind, Play/Pause, Forward) AND Custom Minute Box on the SAME LINE */}
-        <div className="w-full flex items-center justify-between gap-1.5 sm:gap-3 flex-nowrap overflow-x-auto no-scrollbar">
-          {/* Left: Rewind, Play/Pause, Forward, and Custom Minute Box on the SAME LINE */}
-          <div className="flex items-center gap-1 xs:gap-1.5 sm:gap-2 shrink-0">
+        {/* ROW 1: Playback Controls (Rewind, Play/Pause, Forward, Custom Minute Box, Desktop Episode Stepper, Desktop Volume, Back, Fullscreen) on ONE LINE */}
+        <div className="w-full flex items-center justify-between gap-1 sm:gap-1.5 md:gap-2 flex-nowrap overflow-x-auto no-scrollbar">
+          {/* Left: Rewind, Play/Pause, Forward, Custom Minute Box, Desktop Episode Stepper, Desktop Volume Deck on the SAME LINE */}
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 flex-nowrap min-w-0 shrink">
             {/* Seek -10s */}
             <button
               id="player-control-rewind-btn"
               type="button"
               onClick={() => handleSeek(-10)}
-              className="p-1.5 xs:p-2 sm:p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 flex items-center justify-center cursor-pointer active:scale-95 transition-all shadow-sm shrink-0"
+              className="p-1 sm:p-1.5 md:p-2 rounded-lg md:rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 flex items-center justify-center cursor-pointer active:scale-95 transition-all shadow-sm shrink-0"
               title="Rewind 10 seconds"
               aria-label="Rewind 10s"
             >
@@ -1265,7 +1265,7 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               id="player-control-play-pause-btn"
               type="button"
               onClick={handleTogglePlay}
-              className={`px-2.5 xs:px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer shadow-md shrink-0 ${
+              className={`px-2 sm:px-2.5 md:px-3 lg:px-4 py-1 sm:py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-xs flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-md shrink-0 ${
                 isPlaying
                   ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/20'
                   : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20'
@@ -1275,12 +1275,12 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               {isPlaying ? (
                 <>
                   <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-black stroke-black" />
-                  <span className="hidden xs:inline">Pause</span>
+                  <span className="hidden xl:inline text-xs">Pause</span>
                 </>
               ) : (
                 <>
                   <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-black stroke-black" />
-                  <span className="hidden xs:inline">Play</span>
+                  <span className="hidden xl:inline text-xs">Play</span>
                 </>
               )}
             </button>
@@ -1290,7 +1290,7 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               id="player-control-forward-btn"
               type="button"
               onClick={() => handleSeek(10)}
-              className="p-1.5 xs:p-2 sm:p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 flex items-center justify-center cursor-pointer active:scale-95 transition-all shadow-sm shrink-0"
+              className="p-1 sm:p-1.5 md:p-2 rounded-lg md:rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-amber-400 hover:text-amber-300 flex items-center justify-center cursor-pointer active:scale-95 transition-all shadow-sm shrink-0"
               title="Forward 10 seconds"
               aria-label="Forward 10s"
             >
@@ -1300,10 +1300,10 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
             {/* Custom Minute Box (RIGHT BESIDE Rewind, Play/Pause, Forward on the SAME LINE!) */}
             <div 
               id="player-control-custom-minute-box"
-              className="flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-xl px-1.5 sm:px-2 py-1 gap-1 focus-within:border-amber-500/60 transition-all shadow-sm shrink-0"
+              className="flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-lg md:rounded-xl px-1 sm:px-1.5 md:px-2 py-0.5 sm:py-1 gap-0.5 sm:gap-1 focus-within:border-amber-500/60 transition-all shadow-sm shrink-0"
               title="Enter minutes to jump and play directly"
             >
-              <span className="text-[10px] sm:text-xs font-mono font-bold text-zinc-400 uppercase tracking-tight pl-0.5 select-none">
+              <span className="text-[9px] sm:text-[10px] md:text-xs font-mono font-bold text-zinc-400 uppercase tracking-tight pl-0.5 select-none">
                 Min:
               </span>
               <input
@@ -1320,7 +1320,7 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
                     handleCustomMinutePlay();
                   }
                 }}
-                className="w-8 xs:w-10 sm:w-12 text-center bg-transparent text-amber-400 text-xs sm:text-sm font-mono font-bold outline-none placeholder:text-zinc-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                className="w-6 sm:w-8 md:w-9 text-center bg-transparent text-amber-400 text-[11px] sm:text-xs md:text-sm font-mono font-bold outline-none placeholder:text-zinc-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 title="Enter minute (e.g. 5, 12, 45) and click play"
               />
               <button
@@ -1328,12 +1328,136 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
                 type="button"
                 onClick={handleCustomMinutePlay}
                 disabled={!customMinutes.trim()}
-                className="p-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed shadow-sm shrink-0"
+                className="p-0.5 sm:p-1 rounded bg-amber-500 hover:bg-amber-400 text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed shadow-sm shrink-0"
                 title="Play from this minute"
                 aria-label="Play from entered minute"
               >
                 <Play className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-black stroke-black translate-x-0.5" />
               </button>
+            </div>
+
+            {/* PC VERSION ONLY: Episode Selector shown strictly BEFORE the Volume Bar on the SAME LINE */}
+            {isSeries && (
+              <div 
+                id="player-control-episode-deck-desktop" 
+                className="hidden md:flex items-center gap-0.5 sm:gap-1 bg-zinc-900/90 border border-zinc-800 rounded-lg md:rounded-xl px-1 sm:px-1.5 py-0.5 shadow-sm shrink-0"
+              >
+                {/* Season Stepper */}
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[9px] sm:text-[10px] text-zinc-400 font-semibold font-mono">S</span>
+                  <div className="flex items-center bg-black/60 border border-zinc-700/80 rounded px-0.5 py-0.5">
+                    <button
+                      type="button"
+                      onClick={handleDecrementSeason}
+                      disabled={Number(inputSeason) <= 1}
+                      className="p-0.5 text-zinc-400 hover:text-amber-400 disabled:opacity-20 disabled:hover:text-zinc-400 cursor-pointer"
+                      title="Decrease Season"
+                    >
+                      <ChevronDown className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={totalSeasons}
+                      value={inputSeason}
+                      onChange={handleLiveSeasonInputChange}
+                      onKeyDown={handleSeasonEpisodeKeyDown}
+                      className="w-4 sm:w-5 md:w-6 text-center bg-transparent text-amber-400 text-[10px] sm:text-xs font-bold outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleIncrementSeason}
+                      disabled={Number(inputSeason) >= totalSeasons}
+                      className="p-0.5 text-zinc-400 hover:text-amber-400 disabled:opacity-20 disabled:hover:text-zinc-400 cursor-pointer"
+                      title="Increase Season"
+                    >
+                      <ChevronUp className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Episode Stepper */}
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[9px] sm:text-[10px] text-zinc-400 font-semibold font-mono">Ep</span>
+                  <div className="flex items-center bg-black/60 border border-zinc-700/80 rounded px-0.5 py-0.5">
+                    <button
+                      type="button"
+                      onClick={handleDecrementEpisode}
+                      disabled={Number(inputEpisode) <= 1}
+                      className="p-0.5 text-zinc-400 hover:text-amber-400 disabled:opacity-20 disabled:hover:text-zinc-400 cursor-pointer"
+                      title="Decrease Episode"
+                    >
+                      <ChevronDown className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={liveTargetSeasonEpisodes}
+                      value={inputEpisode}
+                      onChange={handleLiveEpisodeInputChange}
+                      onKeyDown={handleSeasonEpisodeKeyDown}
+                      className="w-4 sm:w-5 md:w-6 text-center bg-transparent text-amber-400 text-[10px] sm:text-xs font-bold outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleIncrementEpisode}
+                      disabled={Number(inputEpisode) >= liveTargetSeasonEpisodes}
+                      className="p-0.5 text-zinc-400 hover:text-amber-400 disabled:opacity-20 disabled:hover:text-zinc-400 cursor-pointer"
+                      title="Increase Episode"
+                    >
+                      <ChevronUp className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Play Episode Button */}
+                <button
+                  id="btn-player-season-episode-desktop"
+                  type="button"
+                  onClick={handlePlayCustomSeasonEpisode}
+                  className="p-0.5 sm:px-1.5 sm:py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-black text-[10px] sm:text-xs font-bold flex items-center gap-0.5 active:scale-95 transition-all cursor-pointer shadow-sm shrink-0"
+                  title={`Play Season ${inputSeason} Episode ${inputEpisode}`}
+                >
+                  <Play className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-black stroke-black" />
+                  <span className="hidden xl:inline">Play</span>
+                </button>
+              </div>
+            )}
+
+            {/* PC Volume Deck: Seated strictly right after Episode Selector on the SAME LINE */}
+            <div 
+              id="player-control-volume-deck-desktop"
+              className="hidden md:flex items-center gap-1 sm:gap-1.5 bg-zinc-900/90 border border-zinc-800 rounded-lg md:rounded-xl px-1.5 sm:px-2 py-0.5 sm:py-1 shadow-sm shrink-0"
+            >
+              <button
+                id="player-control-mute-btn-desktop"
+                type="button"
+                onClick={handleToggleMute}
+                className="text-zinc-400 hover:text-amber-400 transition-colors p-0.5 cursor-pointer shrink-0"
+                title={isMuted ? "Unmute" : "Mute"}
+              >
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-red-400" />
+                ) : volume < 50 ? (
+                  <Volume1 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+                )}
+              </button>
+              <input
+                id="player-control-volume-slider-desktop"
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                className="w-12 sm:w-16 md:w-20 lg:w-24 h-1 sm:h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                title={`Volume: ${isMuted ? 'Muted' : `${volume}%`}`}
+              />
+              <span className="text-[9px] sm:text-[10px] md:text-xs font-mono text-zinc-400 w-5 sm:w-6 text-right font-semibold shrink-0">
+                {isMuted ? '0%' : `${volume}%`}
+              </span>
             </div>
           </div>
 
@@ -1347,12 +1471,12 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
                 soundFx.playClick('switch');
                 popupManager.closeAllOpenedTabs();
               }}
-              className="p-1.5 xs:px-2.5 sm:px-3 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-zinc-300 hover:text-amber-400 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer text-xs font-semibold shadow-sm shrink-0"
+              className="p-1 sm:p-1.5 md:px-2.5 md:py-1.5 rounded-lg md:rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-zinc-300 hover:text-amber-400 flex items-center gap-1 active:scale-95 transition-all cursor-pointer text-xs font-semibold shadow-sm shrink-0"
               title="Back / Close Ad Tab without reloading player"
               aria-label="Back / Close Tab"
             >
               <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
-              <span className="hidden sm:inline">Back</span>
+              <span className="hidden lg:inline text-xs">Back</span>
             </button>
 
             {/* Full Screen Button */}
@@ -1360,18 +1484,18 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               id="player-control-fullscreen-btn"
               type="button"
               onClick={handleFullscreen}
-              className="p-1.5 xs:px-2.5 sm:px-3 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-zinc-300 hover:text-amber-400 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer text-xs font-semibold shadow-sm shrink-0"
+              className="p-1 sm:p-1.5 md:px-2.5 md:py-1.5 rounded-lg md:rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/40 text-zinc-300 hover:text-amber-400 flex items-center gap-1 active:scale-95 transition-all cursor-pointer text-xs font-semibold shadow-sm shrink-0"
               title="Fullscreen Player (F)"
               aria-label="Fullscreen Player"
             >
               <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
-              <span className="hidden sm:inline">Full Screen</span>
+              <span className="hidden lg:inline text-xs">Full Screen</span>
             </button>
           </div>
         </div>
 
-        {/* ROW 2 (NICHER LINE): Episode Selector AND Volumebar in ONE line ("tarnicher line a thakbe episode selector and voliumebar ek line a") */}
-        <div className="w-full flex items-center justify-between gap-2 sm:gap-3 pt-2 border-t border-zinc-800/80 flex-nowrap">
+        {/* ROW 2 (NICHER LINE): Mobile only (< md). Hidden on other devices (md:hidden) so all options stay in ONE line without extra line below */}
+        <div className="w-full flex md:hidden items-center justify-between gap-2 sm:gap-3 pt-2 border-t border-zinc-800/80 flex-nowrap">
           {/* Episode Selector */}
           {isSeries && (
             <div 

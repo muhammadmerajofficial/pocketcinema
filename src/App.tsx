@@ -1143,6 +1143,48 @@ export default function App() {
         </div>
       </header>
 
+      {/* 2. FULL-WIDTH CINEMA PLAYER (Screen Fit Edge-to-Edge with NO Left/Right Blank Space on ANY Device) */}
+      {!pairingCode && (playingMedia || (mediaItems && mediaItems.length > 0)) && !isPlayerDismissed && (
+        <section 
+          id="main-page-cinema-player-section" 
+          className="w-full bg-black flex flex-col items-center animate-fadeIn mb-2"
+        >
+          <MediaLivePlayer
+            item={playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0]}
+            onClose={() => {
+              soundFx.playClick('switch');
+              setIsPlayerDismissed(true);
+            }}
+            isPlayerHidden={isPlayerHidden}
+            onToggleHide={() => setIsPlayerHidden((prev) => !prev)}
+            isLocked={isScreenLocked}
+            onToggleLock={() => setIsScreenLocked((prev) => !prev)}
+            currentServerIndex={playerServerIndex}
+            currentSeason={playerSeason}
+            currentEpisode={playerEpisode}
+            onPlayerConfigChange={(cfg) => {
+              setPlayerServerIndex(cfg.serverIndex);
+              setPlayerSeason(cfg.season);
+              setPlayerEpisode(cfg.episode);
+            }}
+            onNextTrack={() => {
+              if (mediaItems.length > 0) {
+                const nextIdx = (selectedIndex + 1) % mediaItems.length;
+                setSelectedIndex(nextIdx);
+                handlePlayMedia(mediaItems[nextIdx], 1, 1);
+              }
+            }}
+            onPrevTrack={() => {
+              if (mediaItems.length > 0) {
+                const prevIdx = (selectedIndex - 1 + mediaItems.length) % mediaItems.length;
+                setSelectedIndex(prevIdx);
+                handlePlayMedia(mediaItems[prevIdx], 1, 1);
+              }
+            }}
+          />
+        </section>
+      )}
+
       {/* 3. MAIN CONTENT CONTAINER */}
       <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 py-4 flex-1 flex flex-col gap-4 transition-all pb-12">
         {/* If TV Screen is Connected: Show TV Controller inside Remote Page ("tv controlar remote er vitore show korbe tv page connect korar sathe sathei") */}
@@ -1167,47 +1209,6 @@ export default function App() {
         ) : (
           /* ONLY WHEN TV IS NOT CONNECTED: Main page player operates normally! ("sudu matro tv screen page connect na thaklei main page er player a sob kichu colbe") */
           <>
-            {(playingMedia || (mediaItems && mediaItems.length > 0)) && !isPlayerDismissed && (
-              <section 
-                id="main-page-cinema-player-section" 
-                className="w-full flex flex-col items-center animate-fadeIn mb-1"
-              >
-                <MediaLivePlayer
-                  item={playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0]}
-                  onClose={() => {
-                    soundFx.playClick('switch');
-                    setIsPlayerDismissed(true);
-                  }}
-                  isPlayerHidden={isPlayerHidden}
-                  onToggleHide={() => setIsPlayerHidden((prev) => !prev)}
-                  isLocked={isScreenLocked}
-                  onToggleLock={() => setIsScreenLocked((prev) => !prev)}
-                  currentServerIndex={playerServerIndex}
-                  currentSeason={playerSeason}
-                  currentEpisode={playerEpisode}
-                  onPlayerConfigChange={(cfg) => {
-                    setPlayerServerIndex(cfg.serverIndex);
-                    setPlayerSeason(cfg.season);
-                    setPlayerEpisode(cfg.episode);
-                  }}
-                  onNextTrack={() => {
-                    if (mediaItems.length > 0) {
-                      const nextIdx = (selectedIndex + 1) % mediaItems.length;
-                      setSelectedIndex(nextIdx);
-                      handlePlayMedia(mediaItems[nextIdx], 1, 1);
-                    }
-                  }}
-                  onPrevTrack={() => {
-                    if (mediaItems.length > 0) {
-                      const prevIdx = (selectedIndex - 1 + mediaItems.length) % mediaItems.length;
-                      setSelectedIndex(prevIdx);
-                      handlePlayMedia(mediaItems[prevIdx], 1, 1);
-                    }
-                  }}
-                />
-              </section>
-            )}
-
             {/* Minimized / Re-open Bar when dismissed */}
             {isPlayerDismissed && (
               <div 
