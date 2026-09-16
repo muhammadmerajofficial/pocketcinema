@@ -6,7 +6,6 @@ import {
   Play,
   Loader2,
   CheckCircle2,
-  Info,
   User,
   Film,
   Sparkles,
@@ -400,28 +399,11 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                       </p>
                     </div>
 
-                    {/* Tags and Play/Info Action */}
-                    <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-zinc-400 pt-1 border-t border-zinc-800/60 mt-0.5">
-                      <span className="truncate max-w-[75px] sm:max-w-[90px] text-zinc-400">
-                        {item.genres[0] || 'Media'}
+                    {/* Media Genre Tag */}
+                    <div className="flex items-center text-[9px] sm:text-[10px] text-zinc-400 pt-1 border-t border-zinc-800/60 mt-0.5">
+                      <span className="truncate text-zinc-400 font-medium">
+                        {item.genres.slice(0, 2).join(' • ') || 'Media'}
                       </span>
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (disabled) return;
-                          soundFx.playClick('nav');
-                          onOpenDetails(item);
-                        }}
-                        className={`text-zinc-400 hover:text-amber-300 font-mono text-[9px] shrink-0 flex items-center gap-0.5 p-1 -m-1 rounded hover:bg-zinc-800 transition-colors ${
-                          disabled ? 'pointer-events-none opacity-40 cursor-not-allowed' : ''
-                        }`}
-                        title="View Synopsis"
-                      >
-                        <Info className="w-2.5 h-2.5" />
-                        Info
-                      </button>
                     </div>
                   </div>
                 </article>

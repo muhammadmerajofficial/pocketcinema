@@ -27,6 +27,7 @@ export type SyncMessage =
   | { type: 'ROOM_UPDATE'; roomCode?: string; data?: any }
   | { type: 'ROOM_ANNOUNCE'; roomCode: string }
   | { type: 'TV_ACTIVE_CODE'; code: string }
+  | { type: 'TV_OPENED'; code: string }
   | { type: 'MOUSE_MOVE'; x: number; y: number; timestamp?: number }
   | { type: 'MOUSE_CLICK'; x: number; y: number; button?: 'left' | 'right'; timestamp?: number }
   | { type: 'MOUSE_SCROLL'; deltaY: number; timestamp?: number }

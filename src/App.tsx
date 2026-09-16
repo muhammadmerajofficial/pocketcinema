@@ -39,6 +39,7 @@ import { LiveDisplayScreen } from './components/LiveDisplayScreen';
 import { MediaLivePlayer } from './components/MediaLivePlayer';
 import { soundFx } from './utils/sound';
 import { syncManager, SyncMessage } from './utils/syncChannel';
+import { popupManager } from './utils/popupManager';
 import { 
   connectToRoom, 
   updateRoom, 
@@ -196,6 +197,10 @@ export default function App() {
 
   const autoPlayCategoryChangeRef = useRef(false);
 
+  // Auto-connect tracking ref
+  const disconnectedRoomCodeRef = useRef<string | null>(null);
+  const handleConnectRoomCodeRef = useRef<(code: string) => Promise<void>>(async () => {});
+
   // Sync mainPageCodeInput whenever pairingCode changes
   useEffect(() => {
     if (pairingCode) {
@@ -203,12 +208,15 @@ export default function App() {
     }
   }, [pairingCode]);
 
-  // Auto-connect if URL has ?room=XXXX or ?code=XXXX on mount
+  // Auto-connect if URL has ?room=XXXX or ?code=XXXX or saved active TV room code on mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const roomParam = urlParams.get('room') || urlParams.get('code');
-    if (roomParam && roomParam.trim().length === 4) {
-      const clean = roomParam.trim();
+    const savedActiveCode = typeof window !== 'undefined' ? (localStorage.getItem('active_tv_screen_code') || localStorage.getItem('cinematic_remote_room_code')) : null;
+    const targetCode = roomParam || savedActiveCode;
+    
+    if (targetCode && targetCode.trim().length === 4) {
+      const clean = targetCode.trim();
       connectToRoom(clean).then((res) => {
         if (res.success && res.data) {
           setPairingCode(clean);
@@ -249,11 +257,6 @@ export default function App() {
               });
             }
           }
-        } else {
-          setMainPageConnectFeedback({
-            success: false,
-            msg: res.message || 'TV Room not found.'
-          });
         }
       });
     }
@@ -361,13 +364,16 @@ export default function App() {
             localStorage.setItem('active_tv_screen_code', code);
           } catch (_) {}
         }
-      } else if ((msg as any).type === 'TV_ACTIVE_CODE') {
+      } else if ((msg as any).type === 'TV_ACTIVE_CODE' || (msg as any).type === 'TV_OPENED') {
         const activeMsg = msg as any;
         const code = String(activeMsg.code || '').trim().replace(/\D/g, '');
         if (code && code.length === 4) {
           setTvScreenCode(code);
           if (!pairingCodeRef.current) {
             setMainPageCodeInput(code);
+            if (disconnectedRoomCodeRef.current !== code) {
+              handleConnectRoomCodeRef.current(code);
+            }
           }
           try {
             localStorage.setItem('active_tv_screen_code', code);
@@ -382,6 +388,9 @@ export default function App() {
         setTvScreenCode(code);
         if (!pairingCodeRef.current) {
           setMainPageCodeInput(code);
+          if (disconnectedRoomCodeRef.current !== code) {
+            handleConnectRoomCodeRef.current(code);
+          }
         }
         try {
           localStorage.setItem('active_tv_screen_code', code);
@@ -397,6 +406,9 @@ export default function App() {
           setTvScreenCode(code);
           if (!pairingCodeRef.current) {
             setMainPageCodeInput(code);
+            if (disconnectedRoomCodeRef.current !== code) {
+              handleConnectRoomCodeRef.current(code);
+            }
           }
         }
       }
@@ -413,6 +425,9 @@ export default function App() {
             setTvScreenCode(saved.trim());
             if (!pairingCodeRef.current) {
               setMainPageCodeInput(saved.trim());
+              if (disconnectedRoomCodeRef.current !== saved.trim()) {
+                handleConnectRoomCodeRef.current(saved.trim());
+              }
             }
           }
         }
@@ -450,6 +465,11 @@ export default function App() {
     setRemoteVolume(100);
     setPlayerSeason(season);
     setPlayerEpisode(episode);
+
+    // Trap history so mobile back button closes ad tabs without reloading player
+    try {
+      window.history.pushState({ playerScreen: true, mediaId: item.id }, '', window.location.href);
+    } catch (_) {}
 
     const now = Date.now();
     const currentServerIndex = playerServerIndexRef.current;
@@ -491,6 +511,7 @@ export default function App() {
 
   // Direct connect handler for 4-digit Room Code
   const handleConnectRoomCode = async (code: string) => {
+    disconnectedRoomCodeRef.current = null;
     const clean = code.trim();
     if (!clean || clean.length !== 4) {
       setMainPageConnectFeedback({
@@ -565,8 +586,10 @@ export default function App() {
       setIsConnectingMainPage(false);
     }
   };
+  handleConnectRoomCodeRef.current = handleConnectRoomCode;
 
   const handleMainPageConnect = async (e?: React.FormEvent) => {
+    disconnectedRoomCodeRef.current = null;
     if (e) e.preventDefault();
     await handleConnectRoomCode(mainPageCodeInput);
   };
@@ -574,6 +597,7 @@ export default function App() {
   const [copiedTvCode, setCopiedTvCode] = useState(false);
 
   const handleTvCodeBoxClick = async () => {
+    disconnectedRoomCodeRef.current = null;
     soundFx.playClick('switch');
     setMainPageCodeInput(tvScreenCode);
     if (navigator?.clipboard?.writeText) {
@@ -687,6 +711,7 @@ export default function App() {
     syncManager.broadcast({ type: 'CLOSE_PLAYER' });
     const code = pairingCodeRef.current || (typeof window !== 'undefined' ? localStorage.getItem('cinematic_remote_room_code') : '') || '';
     if (code) {
+      disconnectedRoomCodeRef.current = code;
       updateRoom(code, {
         action: 'close',
         isPlaying: false,
@@ -704,6 +729,7 @@ export default function App() {
   const handleDisconnectRemote = () => {
     soundFx.playClick('switch');
     if (pairingCode) {
+      disconnectedRoomCodeRef.current = pairingCode;
       closeRoom(pairingCode);
     }
     setPairingCode('');
@@ -1118,55 +1144,26 @@ export default function App() {
       </header>
 
       {/* 3. MAIN CONTENT CONTAINER */}
-      <div className={`max-w-7xl mx-auto w-full px-4 sm:px-6 py-4 flex-1 flex flex-col gap-4 transition-all ${
-        pairingCode ? 'pb-20 sm:pb-24' : 'pb-12'
-      }`}>
-        {/* If TV Screen is Connected: Lock Main Page Player ("tv connect korle tkhon main page a player lock thakbe mane open kora jabe na") */}
+      <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 py-4 flex-1 flex flex-col gap-4 transition-all pb-12">
+        {/* If TV Screen is Connected: Show TV Controller inside Remote Page ("tv controlar remote er vitore show korbe tv page connect korar sathe sathei") */}
         {pairingCode ? (
-          <div 
-            id="main-page-tv-connected-locked-banner"
-            className="w-full rounded-2xl bg-zinc-950/90 border border-emerald-500/40 p-3 sm:p-4 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn mb-1"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 sm:p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <Tv2 className="w-5 h-5" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="flex h-2 w-2 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                  <span className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider">
-                    TV Screen Connected • Room #{pairingCode}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-mono text-amber-300 font-bold flex items-center gap-1">
-                    <Lock className="w-3 h-3 text-amber-400" />
-                    <span>Main Player Locked</span>
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-300 font-medium mt-1">
-                  Streaming <span className="text-amber-300 font-bold">{playingMedia?.title || 'Selected Title'}</span> directly on TV display.
-                </p>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
-                  Main page player is locked while TV is active. Click Disconnect in top bar to unlock.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-              {/* UNCLICKABLE Open Player button when TV page is active */}
-              <button
-                type="button"
-                disabled={true}
-                className="px-3.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-500 font-bold text-xs flex items-center gap-1.5 cursor-not-allowed opacity-50 select-none pointer-events-none transition-none shadow-none"
-                title="TV page is active. Player is locked and unclickable. Click Disconnect in header to unlock."
-              >
-                <Lock className="w-3.5 h-3.5 text-zinc-500" />
-                <span>Open Player</span>
-              </button>
-            </div>
-          </div>
+          <ConnectedRemotePanel
+            variant="embedded"
+            isPlaying={isRemotePlaying}
+            item={playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0]}
+            season={playerSeason}
+            episode={playerEpisode}
+            category={activeCategory}
+            volume={remoteVolume}
+            onVolumeChange={handleVolumeChange}
+            onTogglePlayPause={handleTogglePlayPause}
+            onRewind10={handleRewind10}
+            onForward10={handleForward10}
+            onSeekTime={handleSeekTime}
+            onPlaySeasonEpisode={handlePlaySeasonEpisode}
+            onCloseSession={handleCloseSession}
+            pairingCode={pairingCode}
+          />
         ) : (
           /* ONLY WHEN TV IS NOT CONNECTED: Main page player operates normally! ("sudu matro tv screen page connect na thaklei main page er player a sob kichu colbe") */
           <>
@@ -1328,7 +1325,7 @@ export default function App() {
         items={currentNavItems}
         selectedIndex={selectedIndex}
         category={activeCategory}
-        hasBottomBar={Boolean(pairingCode)}
+        hasBottomBar={false}
         disabled={isScreenLocked}
         onSelectItem={(idx) => {
           if (isScreenLocked) return;
@@ -1339,25 +1336,6 @@ export default function App() {
           handlePlayMedia(item, 1, 1);
         }}
       />
-
-      {/* 5. SLEEK BOTTOM PLAYER CONTROL BAR: ONLY displays when TV Screen is active/connected */}
-      {Boolean(pairingCode) && (
-        <ConnectedRemotePanel
-          isPlaying={isRemotePlaying}
-          item={playingMedia || (mediaItems && mediaItems.length > 0 ? mediaItems[selectedIndex] : null) || MEDIA_COLLECTION[0]}
-          season={playerSeason}
-          episode={playerEpisode}
-          category={activeCategory}
-          volume={remoteVolume}
-          onVolumeChange={handleVolumeChange}
-          onTogglePlayPause={handleTogglePlayPause}
-          onRewind10={handleRewind10}
-          onForward10={handleForward10}
-          onSeekTime={handleSeekTime}
-          onPlaySeasonEpisode={handlePlaySeasonEpisode}
-          onCloseSession={handleCloseSession}
-        />
-      )}
 
       {/* Media Detail Modal */}
       {activeModalItem && (

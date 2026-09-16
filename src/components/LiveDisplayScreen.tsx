@@ -111,13 +111,31 @@ export const LiveDisplayScreen: React.FC = () => {
     if (!roomCode) return;
     
     publishActiveTvRoom(roomCode);
+    syncManager.broadcast({
+      type: 'TV_ACTIVE_CODE',
+      code: roomCode,
+    });
+    syncManager.broadcast({
+      type: 'TV_OPENED',
+      code: roomCode,
+    });
 
     // Re-announce periodically so any remote tab mounting or connecting catches it
-    const t1 = setTimeout(() => publishActiveTvRoom(roomCode), 150);
-    const t2 = setTimeout(() => publishActiveTvRoom(roomCode), 500);
-    const t3 = setTimeout(() => publishActiveTvRoom(roomCode), 1200);
+    const t1 = setTimeout(() => {
+      publishActiveTvRoom(roomCode);
+      syncManager.broadcast({ type: 'TV_ACTIVE_CODE', code: roomCode });
+    }, 150);
+    const t2 = setTimeout(() => {
+      publishActiveTvRoom(roomCode);
+      syncManager.broadcast({ type: 'TV_ACTIVE_CODE', code: roomCode });
+    }, 500);
+    const t3 = setTimeout(() => {
+      publishActiveTvRoom(roomCode);
+      syncManager.broadcast({ type: 'TV_ACTIVE_CODE', code: roomCode });
+    }, 1200);
     const t4 = setInterval(() => {
       publishActiveTvRoom(roomCode);
+      syncManager.broadcast({ type: 'TV_ACTIVE_CODE', code: roomCode });
     }, 3500);
 
     return () => {
@@ -365,8 +383,15 @@ export const LiveDisplayScreen: React.FC = () => {
           } else if (data.action === 'seek') {
             const seekVal = typeof data.currentTime === 'number' ? data.currentTime : 0;
             setLatestCommand({ command: 'seek', value: seekVal, timestamp: ts });
-          } else if (data.action === 'back' || data.action === 'close_tab' || data.action === 'close_popups') {
+          } else if (data.action === 'back' || (data.action as string) === 'close_tab' || (data.action as string) === 'close_popups') {
             popupManager.closeAllOpenedTabs();
+          } else if (data.action === 'fullscreen') {
+            setLatestCommand({ command: 'fullscreen', timestamp: ts });
+            if (!document.fullscreenElement) {
+              document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+              document.exitFullscreen().catch(() => {});
+            }
           }
         }
       }
@@ -436,6 +461,13 @@ export const LiveDisplayScreen: React.FC = () => {
           setPlayingItem(null);
         } else if (msg.command === 'back' || msg.command === 'close_tab' || msg.command === 'close_popups') {
           popupManager.closeAllOpenedTabs();
+        } else if (msg.command === 'fullscreen') {
+          setLatestCommand({ command: 'fullscreen', timestamp: msg.timestamp });
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+          } else {
+            document.exitFullscreen().catch(() => {});
+          }
         } else {
           setLatestCommand({ command: msg.command, value: msg.value, extra: msg.extra, timestamp: msg.timestamp });
         }

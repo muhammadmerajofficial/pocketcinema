@@ -18,7 +18,7 @@ export interface RoomData {
   isPlaying: boolean;
   currentTime: number;
   duration?: number;
-  action: 'none' | 'play' | 'pause' | 'close' | 'rewind' | 'forward' | 'seek';
+  action: 'none' | 'play' | 'pause' | 'close' | 'rewind' | 'forward' | 'seek' | 'fullscreen' | 'back';
   volume: number; // 0 to 100
   status: 'waiting' | 'connected' | 'closed';
   controllerId?: string | null;
